@@ -34,3 +34,5 @@ Thumbs.db
 # Local Claude configuration
 .claude/
 .claude.local.md
+.codegraph/
+tests/demo**

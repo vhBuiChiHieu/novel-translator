@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
 
 import httpx
 from pydantic import ValidationError
@@ -14,17 +13,11 @@ from novel_translator.infrastructure.model.exceptions import (
     ModelProviderError,
     ModelTimeoutError,
 )
+from novel_translator.infrastructure.model.provider import ProviderMetrics
 from novel_translator.schemas.translation_request import TranslationRequest
 from novel_translator.schemas.translation_response import TranslationResponse
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class ProviderMetrics:
-    prompt_tokens: int = 0
-    output_tokens: int = 0
-    duration_ms: int = 0
 
 
 class OllamaProvider:

@@ -6,7 +6,7 @@ from novel_translator.application.services.import_service import ImportService
 from novel_translator.application.services.project_service import ProjectService
 from novel_translator.application.services.translation_service import TranslationService
 from novel_translator.config import load_project_settings
-from novel_translator.infrastructure.model.ollama_provider import ProviderMetrics
+from novel_translator.infrastructure.model.provider import ProviderMetrics
 from novel_translator.infrastructure.persistence.database import create_session_factory, create_sqlite_engine
 from novel_translator.infrastructure.persistence.orm.models import TranslationChunkORM
 from novel_translator.schemas.context_snapshot import ContextSnapshot

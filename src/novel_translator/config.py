@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 
 class ChunkSettings(BaseModel):
@@ -33,6 +33,7 @@ class ModelSettings(BaseModel):
     request_timeout_seconds: int = 300
     max_retries: int = 2
     options: ModelOptions = Field(default_factory=ModelOptions)
+    api_key: SecretStr | None = Field(default=None, exclude=True, repr=False)
 
 
 class ContextAutoConfirmSettings(BaseModel):
@@ -99,7 +100,8 @@ def load_project_settings(project_path: Path, overrides: dict[str, Any] | None =
         raise FileNotFoundError(f"No novel.yaml in current directory: {project_path}")
     with config_path.open("r", encoding="utf-8") as stream:
         raw = yaml.safe_load(stream) or {}
-    model_raw = raw.get("model", {})
+    # Credentials are accepted only from the environment, never project configuration.
+    model_raw = {key: value for key, value in raw.get("model", {}).items() if key != "api_key"}
     translation_raw = raw.get("translation", {})
     context_raw = raw.get("context", {})
     minimum = context_raw.pop("minimum_confidence", {})
@@ -123,6 +125,8 @@ def load_project_settings(project_path: Path, overrides: dict[str, Any] | None =
         data["model"] = {**model_raw, "base_url": value}
     if value := os.getenv("NOVEL_TRANSLATOR_MODEL"):
         data["model"] = {**data["model"], "name": value}
+    if value := os.getenv("NOVEL_TRANSLATOR_DEEPSEEK_API_KEY"):
+        data["model"] = {**data["model"], "api_key": value}
     if overrides:
         data.update({key: value for key, value in overrides.items() if value is not None})
     return ProjectSettings.model_validate(data)

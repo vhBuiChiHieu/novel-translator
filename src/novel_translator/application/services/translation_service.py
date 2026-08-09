@@ -13,7 +13,8 @@ from novel_translator.domain.context.retriever import ExactMatchContextRetriever
 from novel_translator.domain.model.enums import ChunkStatus, JobStatus
 from novel_translator.domain.translation.chunker import ParagraphChapterChunker, normalize_source
 from novel_translator.domain.translation.response_validator import validate_response
-from novel_translator.infrastructure.model.ollama_provider import OllamaProvider
+from novel_translator.infrastructure.model.factory import create_model_provider
+from novel_translator.infrastructure.model.provider import ModelProvider
 from novel_translator.infrastructure.persistence.database import (
     create_session_factory,
     create_sqlite_engine,
@@ -40,7 +41,7 @@ class SourceChangedError(Exception):
 
 
 class TranslationService:
-    def __init__(self, provider: OllamaProvider | None = None) -> None:
+    def __init__(self, provider: ModelProvider | None = None) -> None:
         self.provider = provider
 
     def translate(self, chapter_number: int, *, resume: bool = False, force: bool = False) -> TranslationJobORM:
@@ -61,7 +62,7 @@ class TranslationService:
             job = self._select_job(session, novel, chapter, settings, resume, force, source)
             job_id = job.id
             session.commit()
-        provider = self.provider or OllamaProvider(settings.model)
+        provider = self.provider or create_model_provider(settings.model)
         self._process_job(settings, job_id, provider)
         with sessions() as session:
             completed = session.get(TranslationJobORM, job_id)
@@ -112,7 +113,7 @@ class TranslationService:
             )
         return job
 
-    def _process_job(self, settings: ProjectSettings, job_id: int, provider: OllamaProvider) -> None:
+    def _process_job(self, settings: ProjectSettings, job_id: int, provider: ModelProvider) -> None:
         sessions: SessionFactory = create_session_factory(create_sqlite_engine(settings.database_path))
         with sessions() as session:
             job = session.get(TranslationJobORM, job_id)
@@ -191,7 +192,7 @@ class TranslationService:
         chapter_id: int,
         source_text: str,
         tail: str,
-        provider: OllamaProvider,
+        provider: ModelProvider,
     ) -> None:
         with sessions() as session:
             job = session.get(TranslationJobORM, job_id)
