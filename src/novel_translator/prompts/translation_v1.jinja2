@@ -1,0 +1,35 @@
+## CORE RULES
+- Translate Chinese into natural Vietnamese web-novel prose.
+- Preserve meaning, paragraphs, dialogue, and all details.
+- Do not add explanations or invent facts.
+- Existing confirmed mappings are authoritative. Never replace or reinterpret them.
+- Prefer appropriate Hán Việt wording for xianxia, fantasy, and wuxia.
+
+## CONTEXT UPDATE RULES
+Return only new, explicit, long-term information that affects translation consistency.
+Do not report temporary actions, scenery, guesses, or known context.
+
+## STORY CONTEXT
+### Characters
+{% for item in characters %}- {{ item.source }} = {{ item.translation }}{% if item.description %} ({{ item.description }}){% endif %}
+{% endfor %}### Terms
+{% for item in terms %}- {{ item.source }} = {{ item.translation }}
+{% endfor %}### Locations
+{% for item in locations %}- {{ item.source }} = {{ item.translation }}
+{% endfor %}### Organizations
+{% for item in organizations %}- {{ item.source }} = {{ item.translation }}
+{% endfor %}### Relationships
+{% for item in relationships %}- {{ item.subject }} {{ item.predicate }} {{ item.object }}{% if item.description %}: {{ item.description }}{% endif %}
+{% endfor %}### Addressing
+{% for item in addressing_rules %}- speaker={{ item.speaker }}, listener={{ item.listener }}, speaker_pronoun={{ item.speaker_pronoun }}, listener_pronoun={{ item.listener_pronoun }}, {{ item.source_title }} = {{ item.translated_title }}
+{% endfor %}### World Facts
+{% for item in world_facts %}- {{ item.subject }}: {{ item.fact_key }} = {{ item.fact_value }}
+{% endfor %}
+## PREVIOUS TRANSLATION TAIL
+This is context only. DO NOT translate it again.
+{{ previous_translation_tail }}
+
+## CURRENT CHINESE TEXT
+{{ source_text }}
+
+Return only JSON matching the required structured response.

@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "novel-translator"
+version = "0.1.0"
+description = "Local-first Chinese to Vietnamese novel translation context engine"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "alembic>=1.14",
+  "httpx>=0.27",
+  "jinja2>=3.1",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.6",
+  "PyYAML>=6.0",
+  "SQLAlchemy>=2.0",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.13",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "respx>=0.21",
+  "ruff>=0.8",
+]
+
+[project.scripts]
+novel = "novel_translator.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/novel_translator"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = ["ollama: requires a running local Ollama instance"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 160
+
+[tool.ruff.lint]
+select = ["F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["novel_translator"]
+check_untyped_defs = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+exclude = ["migrations"]
