@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from novel_translator.config import ModelSettings
-from novel_translator.infrastructure.model.exceptions import ModelInvalidResponseError
+from novel_translator.infrastructure.model.exceptions import ModelInvalidResponseError, ModelProviderError
 from novel_translator.infrastructure.model.ollama_provider import OllamaProvider
 from novel_translator.schemas.context_snapshot import ContextSnapshot
 from novel_translator.schemas.translation_request import TranslationRequest
@@ -47,3 +47,20 @@ def test_provider_retries_invalid_structured_response() -> None:
     )
     with pytest.raises(ModelInvalidResponseError):
         provider.translate(request())
+    assert provider.last_diagnostic is not None
+    assert provider.last_diagnostic.body == {"message": {"content": "bad"}}
+
+
+def test_provider_captures_error_response_body() -> None:
+    provider = OllamaProvider(
+        ModelSettings(max_retries=0),
+        httpx.Client(
+            transport=httpx.MockTransport(lambda _: httpx.Response(400, json={"error": "Invalid request"}))
+        ),
+    )
+
+    with pytest.raises(ModelProviderError, match="Ollama HTTP 400"):
+        provider.translate(request())
+    assert provider.last_diagnostic is not None
+    assert provider.last_diagnostic.status_code == 400
+    assert provider.last_diagnostic.body == {"error": "Invalid request"}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, SecretStr
@@ -17,6 +17,10 @@ class ChunkSettings(BaseModel):
 class ContinuitySettings(BaseModel):
     include_previous_tail: bool = True
     previous_tail_paragraphs: int = 3
+
+
+class TranslationSettings(BaseModel):
+    prompt_version: Literal["translation-v1", "translation-v2"] = "translation-v1"
 
 
 class ModelOptions(BaseModel):
@@ -69,6 +73,7 @@ class ProjectSettings(BaseModel):
     target_language: str = "vi"
     genre: list[str] = Field(default_factory=lambda: ["xianxia"])
     model: ModelSettings = Field(default_factory=ModelSettings)
+    prompt_version: Literal["translation-v1", "translation-v2"] = "translation-v1"
     chunk: ChunkSettings = Field(default_factory=ChunkSettings)
     continuity: ContinuitySettings = Field(default_factory=ContinuitySettings)
     context: ContextSettings = Field(default_factory=ContextSettings)
@@ -88,7 +93,11 @@ def default_yaml(project_name: str) -> dict[str, Any]:
         "novel": {"title": "", "source_language": "zh", "target_language": "vi"},
         "genre": ["xianxia"],
         "model": ModelSettings().model_dump(),
-        "translation": {"prompt_version": "translation-v1", "chunk": ChunkSettings().model_dump(), "continuity": ContinuitySettings().model_dump()},
+        "translation": {
+            "prompt_version": TranslationSettings().prompt_version,
+            "chunk": ChunkSettings().model_dump(),
+            "continuity": ContinuitySettings().model_dump(),
+        },
         "context": {**ContextSettings().model_dump(exclude={"minimum_confidence"}), "minimum_confidence": {"auto_confirm": 0.90}},
         "validation": ValidationSettings().model_dump(),
     }
@@ -114,6 +123,7 @@ def load_project_settings(project_path: Path, overrides: dict[str, Any] | None =
         "target_language": raw.get("novel", {}).get("target_language", "vi"),
         "genre": raw.get("genre", ["xianxia"]),
         "model": model_raw,
+        "prompt_version": translation_raw.get("prompt_version", "translation-v1"),
         "chunk": translation_raw.get("chunk", {}),
         "continuity": translation_raw.get("continuity", {}),
         "context": context_raw,

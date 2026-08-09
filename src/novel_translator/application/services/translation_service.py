@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select
@@ -31,6 +34,18 @@ from novel_translator.infrastructure.persistence.repositories.context_repository
 from novel_translator.infrastructure.persistence.unit_of_work import SessionFactory
 from novel_translator.infrastructure.prompting.jinja_prompt_builder import JinjaPromptBuilder
 
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TranslationProgress:
+    event: str
+    chapter_number: int
+    chunk_index: int | None = None
+    total_chunks: int | None = None
+    duration_ms: int | None = None
+    error: str | None = None
+
 
 class ChapterNotFoundError(Exception):
     pass
@@ -44,7 +59,14 @@ class TranslationService:
     def __init__(self, provider: ModelProvider | None = None) -> None:
         self.provider = provider
 
-    def translate(self, chapter_number: int, *, resume: bool = False, force: bool = False) -> TranslationJobORM:
+    def translate(
+        self,
+        chapter_number: int,
+        *,
+        resume: bool = False,
+        force: bool = False,
+        on_progress: Callable[[TranslationProgress], None] | None = None,
+    ) -> TranslationJobORM:
         settings = ProjectService().load_current()
         engine = create_sqlite_engine(settings.database_path)
         sessions = create_session_factory(engine)
@@ -63,7 +85,7 @@ class TranslationService:
             job_id = job.id
             session.commit()
         provider = self.provider or create_model_provider(settings.model)
-        self._process_job(settings, job_id, provider)
+        self._process_job(settings, job_id, chapter_number, provider, on_progress)
         with sessions() as session:
             completed = session.get(TranslationJobORM, job_id)
             assert completed is not None
@@ -93,7 +115,7 @@ class TranslationService:
             chapter_id=chapter.id,
             model_provider=settings.model.provider,
             model_name=settings.model.name,
-            prompt_version="translation-v1",
+            prompt_version=settings.prompt_version,
             status=JobStatus.PENDING.value,
         )
         session.add(job)
@@ -113,13 +135,27 @@ class TranslationService:
             )
         return job
 
-    def _process_job(self, settings: ProjectSettings, job_id: int, provider: ModelProvider) -> None:
+    def _process_job(
+        self,
+        settings: ProjectSettings,
+        job_id: int,
+        chapter_number: int,
+        provider: ModelProvider,
+        on_progress: Callable[[TranslationProgress], None] | None,
+    ) -> None:
         sessions: SessionFactory = create_session_factory(create_sqlite_engine(settings.database_path))
         with sessions() as session:
             job = session.get(TranslationJobORM, job_id)
             assert job is not None
             job.status = JobStatus.RUNNING.value
             job.started_at = job.started_at or datetime.utcnow()
+            total_chunks = len(
+                list(
+                    session.scalars(
+                        select(TranslationChunkORM).where(TranslationChunkORM.translation_job_id == job_id)
+                    )
+                )
+            )
             stale = list(
                 session.scalars(
                     select(TranslationChunkORM).where(
@@ -132,6 +168,8 @@ class TranslationService:
                 chunk.status = ChunkStatus.FAILED.value
                 chunk.error_message = "Interrupted before completion"
             session.commit()
+        self._emit_progress(on_progress, TranslationProgress("job_started", chapter_number, total_chunks=total_chunks))
+        logger.info("Translation started job_id=%s chapter=%s chunks=%s", job_id, chapter_number, total_chunks)
         while True:
             with sessions() as session:
                 job = session.get(TranslationJobORM, job_id)
@@ -150,11 +188,17 @@ class TranslationService:
                 next_chunk.status = ChunkStatus.RUNNING.value
                 next_chunk.previous_translation_tail = tail
                 session.commit()
-                chunk_id, chapter_id, source_text = (
+                chunk_id, chapter_id, source_text, chunk_index = (
                     next_chunk.id,
                     next_chunk.chapter_id,
                     next_chunk.source_text,
+                    next_chunk.chunk_index,
                 )
+            self._emit_progress(
+                on_progress,
+                TranslationProgress("chunk_started", chapter_number, chunk_index, total_chunks),
+            )
+            logger.info("Translation chunk started job_id=%s chunk=%s/%s", job_id, chunk_index + 1, total_chunks)
             try:
                 self._translate_chunk(settings, sessions, job_id, chunk_id, chapter_id, source_text, tail, provider)
             except Exception as error:
@@ -163,12 +207,40 @@ class TranslationService:
                     assert failed is not None
                     failed.status = ChunkStatus.FAILED.value
                     failed.error_message = str(error)
+                    diagnostic = getattr(provider, "last_diagnostic", None)
+                    if diagnostic is not None:
+                        failed.raw_model_response_json = diagnostic.model_dump()
                     job = session.get(TranslationJobORM, job_id)
                     assert job is not None
                     job.status = JobStatus.PARTIAL.value
                     session.commit()
+                logger.exception("Translation chunk failed job_id=%s chunk=%s/%s", job_id, chunk_index + 1, total_chunks)
+                self._emit_progress(
+                    on_progress,
+                    TranslationProgress("chunk_failed", chapter_number, chunk_index, total_chunks, error=str(error)),
+                )
                 raise
+            self._emit_progress(
+                on_progress,
+                TranslationProgress(
+                    "chunk_completed", chapter_number, chunk_index, total_chunks, provider.last_metrics.duration_ms
+                ),
+            )
+            logger.info("Translation chunk completed job_id=%s chunk=%s/%s", job_id, chunk_index + 1, total_chunks)
         self._assemble_and_complete(settings, sessions, job_id)
+        self._emit_progress(on_progress, TranslationProgress("job_completed", chapter_number, total_chunks=total_chunks))
+        logger.info("Translation completed job_id=%s chapter=%s", job_id, chapter_number)
+
+    @staticmethod
+    def _emit_progress(
+        callback: Callable[[TranslationProgress], None] | None, event: TranslationProgress
+    ) -> None:
+        if callback is None:
+            return
+        try:
+            callback(event)
+        except Exception:
+            logger.warning("Translation progress callback failed", exc_info=True)
 
     @staticmethod
     def _previous_tail(session: Session, job_id: int, chunk_index: int, settings: ProjectSettings) -> str:
@@ -199,7 +271,7 @@ class TranslationService:
             assert job is not None
             repository = SqlAlchemyContextRepository(session, job.novel_id)
             snapshot = ExactMatchContextRetriever(repository, settings.context).retrieve(source_text)
-        rendered = JinjaPromptBuilder().build(settings, source_text, snapshot, tail)
+        rendered = JinjaPromptBuilder(job.prompt_version).build(settings, source_text, snapshot, tail)
         response = validate_response(provider.translate(rendered.request), source_text, settings.validation)
         with sessions() as session:
             chunk = session.get(TranslationChunkORM, chunk_id)

@@ -8,13 +8,14 @@ import httpx
 from pydantic import ValidationError
 
 from novel_translator.config import ModelSettings
+from novel_translator.infrastructure.model.diagnostics import error_diagnostic, response_diagnostic
 from novel_translator.infrastructure.model.exceptions import (
     ModelConnectionError,
     ModelInvalidResponseError,
     ModelProviderError,
     ModelTimeoutError,
 )
-from novel_translator.infrastructure.model.provider import ProviderMetrics
+from novel_translator.infrastructure.model.provider import ProviderDiagnostic, ProviderMetrics
 from novel_translator.schemas.translation_request import TranslationRequest
 from novel_translator.schemas.translation_response import TranslationResponse
 
@@ -27,10 +28,14 @@ class DeepSeekProvider:
         self.settings = settings
         self.client = client or httpx.Client(timeout=settings.request_timeout_seconds)
         self.last_metrics = ProviderMetrics()
+        self.last_diagnostic: ProviderDiagnostic | None = None
 
     def translate(self, request: TranslationRequest) -> TranslationResponse:
+        self.last_diagnostic = None
         if self.settings.api_key is None:
-            raise ModelProviderError("DeepSeek API key is not configured")
+            message = "DeepSeek API key is not configured"
+            self.last_diagnostic = error_diagnostic("deepseek", message)
+            raise ModelProviderError(message)
         payload = {
             "model": self.settings.name,
             "messages": [
@@ -48,8 +53,11 @@ class DeepSeekProvider:
             started_at = time.perf_counter()
             try:
                 response = self.client.post(endpoint, json=payload, headers=headers)
+                self.last_diagnostic = response_diagnostic("deepseek", response, "DeepSeek response received")
                 if response.status_code == 429 or response.status_code >= 500:
-                    raise ModelProviderError(f"DeepSeek temporary HTTP {response.status_code}")
+                    message = f"DeepSeek temporary HTTP {response.status_code}"
+                    self.last_diagnostic = response_diagnostic("deepseek", response, message)
+                    raise ModelProviderError(message)
                 response.raise_for_status()
                 body = response.json()
                 choices = body.get("choices")
@@ -69,19 +77,49 @@ class DeepSeekProvider:
             except httpx.TimeoutException as error:
                 failure: ModelProviderError = ModelTimeoutError("DeepSeek request timed out")
                 failure.__cause__ = error
+                self.last_diagnostic = error_diagnostic("deepseek", str(failure))
             except httpx.RequestError as error:
                 failure = ModelConnectionError("Cannot connect to DeepSeek")
                 failure.__cause__ = error
+                self.last_diagnostic = error_diagnostic("deepseek", str(failure))
             except (json.JSONDecodeError, ValidationError, ModelInvalidResponseError) as error:
                 failure = ModelInvalidResponseError("DeepSeek returned invalid structured output")
                 failure.__cause__ = error
+                if self.last_diagnostic is not None:
+                    self.last_diagnostic = ProviderDiagnostic(
+                        provider="deepseek",
+                        message=str(failure),
+                        status_code=self.last_diagnostic.status_code,
+                        body=self.last_diagnostic.body,
+                        truncated=self.last_diagnostic.truncated,
+                    )
             except httpx.HTTPStatusError as error:
-                raise ModelProviderError(f"DeepSeek HTTP {error.response.status_code}") from error
+                message = f"DeepSeek HTTP {error.response.status_code}"
+                self.last_diagnostic = response_diagnostic("deepseek", error.response, message)
+                logger.error(
+                    "DeepSeek request failed attempt=%s reason=%s raw_response=%s",
+                    attempt + 1,
+                    message,
+                    json.dumps(self.last_diagnostic.body, ensure_ascii=False),
+                )
+                raise ModelProviderError(message) from error
             except ModelProviderError as error:
                 failure = error
+            diagnostic_body = self.last_diagnostic.body if self.last_diagnostic is not None else None
             if attempt == self.settings.max_retries:
+                logger.error(
+                    "DeepSeek request failed after %s attempt(s) reason=%s raw_response=%s",
+                    attempt + 1,
+                    failure,
+                    json.dumps(diagnostic_body, ensure_ascii=False),
+                )
                 raise failure
-            logger.warning("Retrying DeepSeek request attempt=%s reason=%s", attempt + 1, failure)
+            logger.warning(
+                "Retrying DeepSeek request attempt=%s reason=%s raw_response=%s",
+                attempt + 1,
+                failure,
+                json.dumps(diagnostic_body, ensure_ascii=False),
+            )
         raise AssertionError("unreachable")
 
     @property

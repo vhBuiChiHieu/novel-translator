@@ -17,11 +17,19 @@ class RenderedPrompt:
     prompt_hash: str
 
 
+PROMPT_TEMPLATES = {
+    "translation-v1": "translation_v1.jinja2",
+    "translation-v2": "translation_v2.jinja2",
+}
+
+
 class JinjaPromptBuilder:
-    def __init__(self) -> None:
-        template_text = (
-            resources.files("novel_translator.prompts").joinpath("translation_v1.jinja2").read_text("utf-8")
-        )
+    def __init__(self, prompt_version: str = "translation-v1") -> None:
+        try:
+            template_name = PROMPT_TEMPLATES[prompt_version]
+        except KeyError as error:
+            raise ValueError(f"Unsupported prompt version: {prompt_version}") from error
+        template_text = resources.files("novel_translator.prompts").joinpath(template_name).read_text("utf-8")
         self.template = Environment(undefined=StrictUndefined, keep_trailing_newline=True).from_string(template_text)
 
     def build(

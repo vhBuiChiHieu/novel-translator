@@ -93,9 +93,16 @@ def test_provider_retries_temporary_response() -> None:
 def test_provider_does_not_retry_permanent_http_error() -> None:
     provider = DeepSeekProvider(
         ModelSettings(provider="deepseek", api_key=SecretStr("secret-token"), max_retries=1),
-        httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(401))),
+        httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(401, json={"error": {"message": "Invalid key", "token": "secret-token"}})
+            )
+        ),
     )
 
     with pytest.raises(ModelProviderError, match="DeepSeek HTTP 401") as error:
         provider.translate(request())
     assert "secret-token" not in str(error.value)
+    assert provider.last_diagnostic is not None
+    assert provider.last_diagnostic.status_code == 401
+    assert provider.last_diagnostic.body == {"error": {"message": "Invalid key", "token": "[redacted]"}}

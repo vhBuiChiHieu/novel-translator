@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import yaml
@@ -13,6 +12,7 @@ from novel_translator.infrastructure.persistence.database import (
 )
 from novel_translator.infrastructure.persistence.migrate import upgrade_database
 from novel_translator.infrastructure.persistence.orm.models import NovelORM
+from novel_translator.infrastructure.project_logging import configure_project_logging
 
 
 class ProjectNotFoundError(Exception):
@@ -67,10 +67,4 @@ class ProjectService:
 
     @staticmethod
     def _configure_logging(project_path: Path, level: str) -> None:
-        log_path = project_path / "logs" / "novel-translator.log"
-        logging.basicConfig(
-            level=getattr(logging, level.upper(), logging.INFO),
-            format="%(asctime)s %(levelname)s %(name)s %(message)s",
-            handlers=[logging.FileHandler(log_path, encoding="utf-8")],
-            force=True,
-        )
+        configure_project_logging(project_path, level)

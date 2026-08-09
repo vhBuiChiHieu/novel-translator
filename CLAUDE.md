@@ -17,14 +17,16 @@
 - `infrastructure/model/` — Ollama and DeepSeek HTTP adapters plus the provider factory; adapters must never write to the database.
 - `infrastructure/prompting/jinja_prompt_builder.py` — loads and renders the versioned prompt template.
 - `schemas/` — Pydantic model I/O; `ContextUpdate` and `TranslationResponse` are the structured model-output contract.
-- `prompts/translation_v1.jinja2` — immutable versioned prompt template once it has been used for translations; create a new version for changes.
+- `prompts/translation_v*.jinja2` — immutable versioned templates; select them through `translation.prompt_version`, persist the version on new jobs, and render resumed jobs with their persisted version.
+- `infrastructure/model/diagnostics.py` — sanitize provider response diagnostics before they are logged or persisted; never log credentials.
 - `cli/` — Typer interface; commands other than `init` require the current directory to contain `novel.yaml`.
 - `tests/unit`, `tests/integration`, `tests/provider` — core logic, project/SQLite flow, and mocked model-provider HTTP tests.
 
 ## Key runtime behavior
 
 - `novel init <name>` — creates `./<name>`; use `cd <name>` before import, translation, context, or export commands.
-- `translation_service.py` — process chunks sequentially, persist context snapshots/metrics, and use a final transaction for chunk response, context merges, conflicts, and completion state.
+- `translation_service.py` — process chunks sequentially, emit progress/project logs, persist context snapshots/metrics, and use a final transaction for chunk response, context merges, conflicts, and completion state.
+- Provider failures — log the sanitized raw response before retrying or failing; failed chunks persist the final diagnostic in `raw_model_response_json`.
 - `domain/context/merger.py` — confirmed mappings are authoritative; translation conflicts create records rather than overwrite mappings.
 - `domain/context/retriever.py` — retrieves confirmed exact source/alias matches and expands relationships only one level.
 

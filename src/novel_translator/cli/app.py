@@ -6,6 +6,7 @@ from typing import Annotated
 import typer
 
 from novel_translator.cli import context, export, import_cmd, project, translate
+from novel_translator.infrastructure.project_logging import shutdown_project_logging
 
 app = typer.Typer(no_args_is_help=True, help="Local-first Chinese to Vietnamese novel translator.")
 app.add_typer(context.app, name="context")
@@ -35,3 +36,5 @@ def run() -> None:
             traceback.print_exc()
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(1) from error
+    finally:
+        shutdown_project_logging()
