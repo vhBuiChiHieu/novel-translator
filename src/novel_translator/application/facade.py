@@ -52,6 +52,13 @@ class ApplicationFacade:
         self._session = ProjectService().open_session(project_path)
         return self._session
 
+    def reset_project(self) -> ProjectSession:
+        """Reset project data and reopen the project with its existing configuration."""
+        project_path = self.session.project_path
+        ProjectService().reset(project_path)
+        self._session = ProjectService().open_session(project_path)
+        return self._session
+
     def get_dashboard(self) -> DashboardDTO:
         session = self.session
         chapters = ChapterQueryService(session).list_chapters()

@@ -132,6 +132,13 @@ class MainWindow(QMainWindow):
         return card, layout
 
     @staticmethod
+    def _set_button_role(button: QPushButton, role: str) -> None:
+        """Apply a dynamic stylesheet role immediately after assigning it."""
+        button.setProperty("role", role)
+        button.style().unpolish(button)
+        button.style().polish(button)
+
+    @staticmethod
     def _optional_option(control: WidgetT, label: str) -> tuple[QCheckBox, WidgetT]:
         """Pair an optional provider parameter with an explicit enable switch."""
         enabled = QCheckBox(label)
@@ -179,7 +186,7 @@ class MainWindow(QMainWindow):
         guidance.setWordWrap(True)
         card_layout.addWidget(guidance)
         button = QPushButton("Open project folder…")
-        button.setProperty("role", "primary")
+        self._set_button_role(button, "primary")
         button.setMinimumWidth(190)
         button.clicked.connect(self._choose_project)
         card_layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignLeft)
@@ -203,7 +210,7 @@ class MainWindow(QMainWindow):
         for label, row in (("Import", 2), ("Translate", 3), ("Settings", 6), ("Export", -1)):
             button = QPushButton(label)
             if label == "Translate":
-                button.setProperty("role", "primary")
+                self._set_button_role(button, "primary")
             if row >= 0:
                 button.clicked.connect(lambda _checked=False, target=row: self.sidebar.setCurrentRow(target))
             else:
@@ -223,7 +230,7 @@ class MainWindow(QMainWindow):
         card, card_layout = self._card()
         top = QHBoxLayout()
         import_button = QPushButton("Choose input folder and preview/import")
-        import_button.setProperty("role", "primary")
+        self._set_button_role(import_button, "primary")
         import_button.clicked.connect(self._choose_import)
         top.addWidget(import_button)
         top.addStretch()
@@ -257,7 +264,7 @@ class MainWindow(QMainWindow):
         form.addWidget(self.resume_check)
         form.addWidget(self.force_check)
         start = QPushButton("Start translation")
-        start.setProperty("role", "primary")
+        self._set_button_role(start, "primary")
         start.clicked.connect(self._start_translation)
         form.addWidget(start)
         form.addStretch()
@@ -443,12 +450,16 @@ class MainWindow(QMainWindow):
         actions_layout.addWidget(actions_title)
         actions = QHBoxLayout()
         save = QPushButton("Validate and save settings")
-        save.setProperty("role", "primary")
+        self._set_button_role(save, "primary")
         save.clicked.connect(self._save_settings)
         actions.addWidget(save)
         check = QPushButton("Check provider configuration")
         check.clicked.connect(self._check_provider_config)
         actions.addWidget(check)
+        reset = QPushButton("Reset project data…")
+        self._set_button_role(reset, "danger")
+        reset.clicked.connect(self._confirm_reset_project)
+        actions.addWidget(reset)
         actions.addStretch()
         actions_layout.addLayout(actions)
         content_layout.addWidget(actions_card)
@@ -504,6 +515,20 @@ class MainWindow(QMainWindow):
             if answer == QMessageBox.StandardButton.Yes:
                 self._run_worker(self.facade.import_chapters, Path(path), done=self._after_import)
 
+    def _confirm_reset_project(self) -> None:
+        if not self.facade:
+            return self._show_error("Open a project first")
+        answer = QMessageBox.warning(
+            self,
+            "Reset project data",
+            "This permanently removes the project database, imported chapters, translated chapters, and exported files.\n\n"
+            "novel.yaml and logs will be kept. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._run_worker(self.facade.reset_project, done=self._after_reset_project)
+
     def _start_translation(self) -> None:
         if not self.facade:
             return self._show_error("Open a project first")
@@ -554,6 +579,18 @@ class MainWindow(QMainWindow):
         self._record_activity("Chapters imported")
         self.statusBar().showMessage("Chapters imported")
         self._refresh_chapters()
+        self._refresh_dashboard()
+
+    def _after_reset_project(self, _result: object) -> None:
+        self._selected_job_id = None
+        self.source_preview.clear()
+        self.job_log.clear()
+        self.results_text.clear()
+        self._record_activity("Project data reset")
+        self.statusBar().showMessage("Project data reset; configuration kept")
+        self._refresh_chapters()
+        self._refresh_jobs()
+        self._refresh_context()
         self._refresh_dashboard()
 
     def _after_translation(self, _result: object) -> None:

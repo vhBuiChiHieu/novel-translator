@@ -62,3 +62,26 @@ def test_setting_api_key_refreshes_open_session(tmp_path: Path, monkeypatch) -> 
 
     assert facade.session.settings.model.api_key is not None
     assert facade.session.settings.model.api_key.get_secret_value() == "secret-from-ui"
+
+
+def test_reset_project_removes_novel_data_but_preserves_configuration(tmp_path: Path) -> None:
+    project = ProjectService().init(tmp_path, "demo")
+    config_path = project / "novel.yaml"
+    original_config = config_path.read_text(encoding="utf-8")
+    input_dir = tmp_path / "chapters"
+    input_dir.mkdir()
+    (input_dir / "chapter_0001.txt").write_text("第一章", encoding="utf-8")
+
+    facade = ApplicationFacade(project)
+    facade.import_chapters(input_dir)
+    (project / "translated" / "chapter_0001.txt").write_text("Chương Một", encoding="utf-8")
+    (project / "exports" / "novel.txt").write_text("Bản cũ", encoding="utf-8")
+
+    facade.reset_project()
+
+    assert config_path.read_text(encoding="utf-8") == original_config
+    assert facade.get_dashboard().health_ok
+    assert facade.list_chapters() == []
+    assert list((project / "source").iterdir()) == []
+    assert list((project / "translated").iterdir()) == []
+    assert list((project / "exports").iterdir()) == []

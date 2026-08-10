@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -34,8 +35,25 @@ class ProjectService:
         with (project_path / "novel.yaml").open("w", encoding="utf-8") as stream:
             yaml.safe_dump(default_yaml(name), stream, allow_unicode=True, sort_keys=False)
         self._configure_logging(project_path, "INFO")
-        upgrade_database(project_path / "data" / "novel.db")
         settings = load_project_settings(project_path)
+        self._create_database(settings)
+        return project_path
+
+    def reset(self, path: Path) -> ProjectSettings:
+        """Clear imported and generated novel data while preserving ``novel.yaml``."""
+        project_path = path.expanduser().resolve()
+        settings = self.load_current(project_path)
+        for directory in ("data", "source", "translated", "exports"):
+            target = project_path / directory
+            if target.exists():
+                shutil.rmtree(target)
+            target.mkdir()
+        self._create_database(settings)
+        return settings
+
+    @staticmethod
+    def _create_database(settings: ProjectSettings) -> None:
+        upgrade_database(settings.database_path)
         engine = create_sqlite_engine(settings.database_path)
         with create_session_factory(engine)() as session:
             session.add(
@@ -47,7 +65,6 @@ class ProjectService:
                 )
             )
             session.commit()
-        return project_path
 
     def load_current(self, path: Path | None = None) -> ProjectSettings:
         project_path = (path or Path.cwd()).resolve()
