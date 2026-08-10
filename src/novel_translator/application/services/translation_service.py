@@ -5,11 +5,13 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from novel_translator.application.services.project_service import ProjectService
+from novel_translator.application.project_scope import open_project_session
+from novel_translator.application.session import ProjectSession
 from novel_translator.config import ProjectSettings
 from novel_translator.domain.context.merger import ContextMerger
 from novel_translator.domain.context.retriever import ExactMatchContextRetriever
@@ -17,13 +19,14 @@ from novel_translator.domain.model.enums import ChunkStatus, JobStatus
 from novel_translator.domain.translation.chunker import ParagraphChapterChunker, normalize_source
 from novel_translator.domain.translation.response_validator import validate_response
 from novel_translator.infrastructure.model.factory import create_model_provider
-from novel_translator.infrastructure.model.provider import ModelProvider
+from novel_translator.infrastructure.model.provider import ModelProvider, ProviderAttempt, ProviderMetrics
 from novel_translator.infrastructure.persistence.database import (
     create_session_factory,
     create_sqlite_engine,
 )
 from novel_translator.infrastructure.persistence.orm.models import (
     ChapterORM,
+    ModelCallORM,
     NovelORM,
     TranslationChunkORM,
     TranslationJobORM,
@@ -33,6 +36,7 @@ from novel_translator.infrastructure.persistence.repositories.context_repository
 )
 from novel_translator.infrastructure.persistence.unit_of_work import SessionFactory
 from novel_translator.infrastructure.prompting.jinja_prompt_builder import JinjaPromptBuilder
+from novel_translator.schemas.translation_response import TranslationResponse
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +60,15 @@ class SourceChangedError(Exception):
 
 
 class TranslationService:
-    def __init__(self, provider: ModelProvider | None = None) -> None:
+    def __init__(
+        self,
+        provider: ModelProvider | None = None,
+        session: ProjectSession | None = None,
+        project_path: Path | None = None,
+    ) -> None:
         self.provider = provider
+        self.session = session
+        self.project_path = project_path
 
     def translate(
         self,
@@ -67,20 +78,22 @@ class TranslationService:
         force: bool = False,
         on_progress: Callable[[TranslationProgress], None] | None = None,
     ) -> TranslationJobORM:
-        settings = ProjectService().load_current()
+        active = open_project_session(self.session, self.project_path)
+        settings = active.settings
         engine = create_sqlite_engine(settings.database_path)
         sessions = create_session_factory(engine)
         with sessions() as session:
-            novel = session.scalar(select(NovelORM).where(NovelORM.project_name == settings.project_name))
             chapter = session.scalar(
-                select(ChapterORM).where(ChapterORM.novel_id == novel.id, ChapterORM.chapter_number == chapter_number)
-            ) if novel else None
-            if novel is None or chapter is None:
+                select(ChapterORM).where(ChapterORM.novel_id == active.novel.id, ChapterORM.chapter_number == chapter_number)
+            )
+            if chapter is None:
                 raise ChapterNotFoundError(f"Chapter {chapter_number} was not imported")
             source_path = settings.project_path / chapter.source_path
             source = normalize_source(source_path.read_text(encoding="utf-8"))
             if hashlib.sha256(source.encode("utf-8")).hexdigest() != chapter.source_hash:
                 raise SourceChangedError("Source chapter has changed since previous translation.")
+            novel = session.get(NovelORM, active.novel.id)
+            assert novel is not None
             job = self._select_job(session, novel, chapter, settings, resume, force, source)
             job_id = job.id
             session.commit()
@@ -108,6 +121,8 @@ class TranslationService:
             job = next((item for item in prior if item.status != JobStatus.COMPLETED.value), None)
             if job is not None:
                 return job
+        if not resume and any(item.status == JobStatus.RUNNING.value for item in prior):
+            raise ValueError("A translation job is already running for this chapter")
         if prior and not force and prior[0].status == JobStatus.COMPLETED.value:
             raise ValueError("Chapter already translated; use --force to create a new translation job")
         job = TranslationJobORM(
@@ -271,28 +286,112 @@ class TranslationService:
             assert job is not None
             repository = SqlAlchemyContextRepository(session, job.novel_id)
             snapshot = ExactMatchContextRetriever(repository, settings.context).retrieve(source_text)
-        rendered = JinjaPromptBuilder(job.prompt_version).build(settings, source_text, snapshot, tail)
-        response = validate_response(provider.translate(rendered.request), source_text, settings.validation)
+            rendered = JinjaPromptBuilder(job.prompt_version).build(settings, source_text, snapshot, tail)
+            previous_attempt = session.scalar(
+                select(func.max(ModelCallORM.attempt_number)).where(
+                    ModelCallORM.translation_job_id == job_id,
+                    ModelCallORM.translation_chunk_id == chunk_id,
+                )
+            )
+            audit = ModelCallORM(
+                translation_job_id=job_id,
+                translation_chunk_id=chunk_id,
+                attempt_number=(previous_attempt or 0) + 1,
+                provider=job.model_provider,
+                model_name=job.model_name,
+                prompt_version=job.prompt_version,
+                system_prompt=rendered.request.system_prompt,
+                user_prompt=rendered.request.user_prompt,
+                source_text=source_text,
+                context_snapshot_json=snapshot.model_dump(),
+                previous_translation_tail=tail,
+                prompt_hash=rendered.prompt_hash,
+                status="running",
+            )
+            session.add(audit)
+            session.flush()
+            audit_id = audit.id
+            session.commit()
+        try:
+            response = validate_response(provider.translate(rendered.request), source_text, settings.validation)
+        except Exception:
+            with sessions() as session:
+                audit_row = session.get(ModelCallORM, audit_id)
+                if audit_row is not None:
+                    self._persist_model_call_attempts(session, audit_row, provider, None, "failed")
+                    session.commit()
+            raise
         with sessions() as session:
             chunk = session.get(TranslationChunkORM, chunk_id)
             job = session.get(TranslationJobORM, job_id)
-            assert chunk is not None and job is not None
+            audit_row = session.get(ModelCallORM, audit_id)
+            assert chunk is not None and job is not None and audit_row is not None
             repository = SqlAlchemyContextRepository(session, job.novel_id)
             ContextMerger(
                 repository, settings.context, source_text, chapter_id, chunk_id, job.model_name, job.prompt_version
             ).merge(response.context_updates)
             chunk.translated_text = response.translation
             chunk.context_snapshot_json = snapshot.model_dump()
-            chunk.raw_model_response_json = response.model_dump()
+            chunk.raw_model_response_json = response.model_dump(exclude_none=True)
             chunk.prompt_hash = rendered.prompt_hash
             chunk.prompt_tokens = provider.last_metrics.prompt_tokens
             chunk.output_tokens = provider.last_metrics.output_tokens
             chunk.duration_ms = provider.last_metrics.duration_ms
             chunk.status = ChunkStatus.COMPLETED.value
+            self._persist_model_call_attempts(session, audit_row, provider, response, "completed")
             job.total_prompt_tokens += chunk.prompt_tokens
             job.total_output_tokens += chunk.output_tokens
             job.total_duration_ms += chunk.duration_ms
             session.commit()
+
+    @staticmethod
+    def _persist_model_call_attempts(
+        session: Session,
+        first_call: ModelCallORM,
+        provider: ModelProvider,
+        response: TranslationResponse | None,
+        default_status: str,
+    ) -> None:
+        attempts = getattr(provider, "last_attempts", None) or [
+            ProviderAttempt(
+                attempt_number=1,
+                status=default_status,
+                metrics=getattr(provider, "last_metrics", ProviderMetrics()),
+                diagnostic=getattr(provider, "last_diagnostic", None),
+            )
+        ]
+        for attempt in attempts:
+            number = int(getattr(attempt, "attempt_number", 1))
+            target = first_call
+            if number != first_call.attempt_number:
+                target = ModelCallORM(
+                    translation_job_id=first_call.translation_job_id,
+                    translation_chunk_id=first_call.translation_chunk_id,
+                    attempt_number=number,
+                    provider=first_call.provider,
+                    model_name=first_call.model_name,
+                    prompt_version=first_call.prompt_version,
+                    system_prompt=first_call.system_prompt,
+                    user_prompt=first_call.user_prompt,
+                    source_text=first_call.source_text,
+                    context_snapshot_json=first_call.context_snapshot_json,
+                    previous_translation_tail=first_call.previous_translation_tail,
+                    prompt_hash=first_call.prompt_hash,
+                    status=getattr(attempt, "status", default_status),
+                )
+                session.add(target)
+            target.status = getattr(attempt, "status", default_status)
+            metrics = getattr(attempt, "metrics", None)
+            if metrics is not None:
+                target.prompt_tokens = metrics.prompt_tokens
+                target.output_tokens = metrics.output_tokens
+                target.duration_ms = metrics.duration_ms
+            diagnostic = getattr(attempt, "diagnostic", None)
+            if target.status == "failed" and diagnostic is not None:
+                target.diagnostic_json = diagnostic.model_dump()
+            if target.status == "completed" and response is not None:
+                target.response_json = response.model_dump(exclude_none=True)
+                target.translated_text = response.translation
 
     def _assemble_and_complete(
         self, settings: ProjectSettings, sessions: SessionFactory, job_id: int

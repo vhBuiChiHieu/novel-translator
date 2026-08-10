@@ -18,6 +18,7 @@ Extract new, explicit, long-term information that will improve consistency in la
 
 ## RESPONSE FORMAT
 Return only one JSON object. Do not use Markdown fences or add explanation.
+For every context update, omit keys that do not apply. Never emit a key with a null value, an empty string, or an empty array; omitted optional keys have their documented defaults.
 
 {
   "translation": "non-empty Vietnamese translation",
@@ -42,7 +43,6 @@ Examples:
   "source": "陆沉",
   "translation": "Lục Trầm",
   "description": "Nhân vật được nhắc đến trong đoạn hiện tại.",
-  "aliases": [],
   "confidence": 0.98
 }
 

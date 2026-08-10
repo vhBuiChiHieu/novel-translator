@@ -6,7 +6,8 @@ from pathlib import Path
 import yaml
 from sqlalchemy import select
 
-from novel_translator.application.services.project_service import ProjectService
+from novel_translator.application.project_scope import open_project_session
+from novel_translator.application.session import ProjectSession
 from novel_translator.domain.model.enums import ContextStatus, ContextType
 from novel_translator.infrastructure.persistence.database import (
     create_session_factory,
@@ -20,11 +21,15 @@ from novel_translator.infrastructure.persistence.orm.models import (
 
 
 class ContextService:
+    def __init__(self, session: ProjectSession | None = None, project_path: Path | None = None) -> None:
+        self.session = session
+        self.project_path = project_path
+
     def _session_and_novel(self):
-        settings = ProjectService().load_current()
+        active = open_project_session(self.session, self.project_path)
+        settings = active.settings
         sessions = create_session_factory(create_sqlite_engine(settings.database_path))
-        novel = ProjectService().get_novel(settings)
-        return settings, sessions, novel
+        return settings, sessions, active.novel
 
     def list_items(self, context_type: str | None, status: str | None) -> list[tuple[str, str, str | None, str]]:
         _, sessions, novel = self._session_and_novel()
@@ -68,6 +73,89 @@ class ContextService:
                     count += 1
             session.commit()
         return count
+
+    def upsert_item(
+        self,
+        context_type: str,
+        source: str,
+        translation: str | None,
+        description: str | None = None,
+        status: str = ContextStatus.CONFIRMED.value,
+    ) -> int:
+        """Create or edit a manual glossary/context mapping."""
+        if context_type not in {"character", "location", "organization", "term"}:
+            raise ValueError(f"Unsupported manual context type: {context_type}")
+        _, sessions, novel = self._session_and_novel()
+        with sessions() as session:
+            if context_type == "term":
+                item = session.scalar(
+                    select(TerminologyORM).where(
+                        TerminologyORM.novel_id == novel.id, TerminologyORM.source_term == source
+                    )
+                )
+                if item is None:
+                    item = TerminologyORM(
+                        novel_id=novel.id,
+                        source_term=source,
+                        translated_term=translation,
+                        description=description,
+                        status=status,
+                        prompt_version="manual",
+                    )
+                    session.add(item)
+                else:
+                    item.translated_term = translation
+                    item.description = description
+                    item.status = status
+            else:
+                item = session.scalar(
+                    select(EntityORM).where(
+                        EntityORM.novel_id == novel.id,
+                        EntityORM.entity_type == context_type,
+                        EntityORM.source_name == source,
+                    )
+                )
+                if item is None:
+                    item = EntityORM(
+                        novel_id=novel.id,
+                        entity_type=context_type,
+                        source_name=source,
+                        translated_name=translation,
+                        description=description,
+                        status=status,
+                        prompt_version="manual",
+                    )
+                    session.add(item)
+                else:
+                    item.translated_name = translation
+                    item.description = description
+                    item.status = status
+            session.flush()
+            item_id = item.id
+            session.commit()
+            return item_id
+
+    def delete_item(self, context_type: str, source: str) -> None:
+        _, sessions, novel = self._session_and_novel()
+        with sessions() as session:
+            if context_type == "term":
+                item = session.scalar(
+                    select(TerminologyORM).where(
+                        TerminologyORM.novel_id == novel.id, TerminologyORM.source_term == source
+                    )
+                )
+            else:
+                item = session.scalar(
+                    select(EntityORM).where(
+                        EntityORM.novel_id == novel.id,
+                        EntityORM.entity_type == context_type,
+                        EntityORM.source_name == source,
+                    )
+                )
+            if item is None:
+                raise ValueError(f"Context item was not found: {context_type} {source}")
+            session.delete(item)
+            session.commit()
 
     def export_yaml(self) -> Path:
         settings, sessions, novel = self._session_and_novel()

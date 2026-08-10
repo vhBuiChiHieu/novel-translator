@@ -30,9 +30,18 @@ class ProviderDiagnostic:
         }
 
 
+@dataclass(frozen=True)
+class ProviderAttempt:
+    attempt_number: int
+    status: str
+    metrics: ProviderMetrics
+    diagnostic: ProviderDiagnostic | None = None
+
+
 class ModelProvider(Protocol):
     last_metrics: ProviderMetrics
     last_diagnostic: ProviderDiagnostic | None
+    last_attempts: list[ProviderAttempt]
 
     def translate(self, request: TranslationRequest) -> TranslationResponse:
         """Translate a normalized request without touching persistence."""

@@ -14,7 +14,7 @@ from novel_translator.infrastructure.model.exceptions import (
     ModelProviderError,
     ModelTimeoutError,
 )
-from novel_translator.infrastructure.model.provider import ProviderDiagnostic, ProviderMetrics
+from novel_translator.infrastructure.model.provider import ProviderAttempt, ProviderDiagnostic, ProviderMetrics
 from novel_translator.schemas.translation_request import TranslationRequest
 from novel_translator.schemas.translation_response import TranslationResponse
 
@@ -27,9 +27,12 @@ class OllamaProvider:
         self.client = client or httpx.Client(timeout=settings.request_timeout_seconds)
         self.last_metrics = ProviderMetrics()
         self.last_diagnostic: ProviderDiagnostic | None = None
+        self.last_attempts: list[ProviderAttempt] = []
 
     def translate(self, request: TranslationRequest) -> TranslationResponse:
         self.last_diagnostic = None
+        self.last_metrics = ProviderMetrics()
+        self.last_attempts = []
         payload = {
             "model": self.settings.name,
             "messages": [
@@ -61,6 +64,9 @@ class OllamaProvider:
                     output_tokens=int(body.get("eval_count", 0)),
                     duration_ms=int(body.get("total_duration", 0) / 1_000_000),
                 )
+                self.last_attempts.append(
+                    ProviderAttempt(attempt + 1, "completed", self.last_metrics, self.last_diagnostic)
+                )
                 return parsed
             except httpx.TimeoutException as error:
                 failure: ModelProviderError = ModelTimeoutError("Ollama request timed out")
@@ -90,9 +96,15 @@ class OllamaProvider:
                     message,
                     json.dumps(self.last_diagnostic.body, ensure_ascii=False),
                 )
+                self.last_attempts.append(
+                    ProviderAttempt(attempt + 1, "failed", self.last_metrics, self.last_diagnostic)
+                )
                 raise ModelProviderError(message) from error
             except ModelProviderError as error:
                 failure = error
+            self.last_attempts.append(
+                ProviderAttempt(attempt + 1, "failed", self.last_metrics, self.last_diagnostic)
+            )
             diagnostic_body = self.last_diagnostic.body if self.last_diagnostic is not None else None
             if attempt == self.settings.max_retries:
                 logger.error(

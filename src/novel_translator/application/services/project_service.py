@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 from sqlalchemy import select
@@ -13,6 +14,9 @@ from novel_translator.infrastructure.persistence.database import (
 from novel_translator.infrastructure.persistence.migrate import upgrade_database
 from novel_translator.infrastructure.persistence.orm.models import NovelORM
 from novel_translator.infrastructure.project_logging import configure_project_logging
+
+if TYPE_CHECKING:
+    from novel_translator.application.session import ProjectSession
 
 
 class ProjectNotFoundError(Exception):
@@ -55,6 +59,44 @@ class ProjectService:
             ) from error
         self._configure_logging(project_path, settings.log_level)
         return settings
+
+    def open_session(self, path: Path) -> ProjectSession:
+        """Open a project from any directory and run pending database migrations."""
+        project_path = path.expanduser().resolve()
+        settings = self.load_current(project_path)
+        if not settings.database_path.exists():
+            raise ProjectNotFoundError(
+                f"Project database is missing: {settings.database_path}. The project must be initialized first."
+            )
+        try:
+            upgrade_database(settings.database_path)
+            novel = self.get_novel(settings)
+        except Exception as error:
+            raise ProjectNotFoundError(f"Project database is invalid: {error}") from error
+        from novel_translator.application.dtos import NovelDTO
+        from novel_translator.application.session import ProjectSession
+
+        return ProjectSession(project_path=project_path, settings=settings, novel=NovelDTO.model_validate(novel))
+
+    def validate(self, path: Path) -> list[str]:
+        """Return human-readable project validation errors without mutating the project."""
+        project_path = path.expanduser().resolve()
+        errors: list[str] = []
+        if not (project_path / "novel.yaml").is_file():
+            errors.append("novel.yaml is missing")
+        if not (project_path / "data" / "novel.db").is_file():
+            errors.append("data/novel.db is missing")
+        for directory in ("source", "translated", "exports", "logs"):
+            if not (project_path / directory).is_dir():
+                errors.append(f"{directory}/ directory is missing")
+        if errors:
+            return errors
+        try:
+            settings = load_project_settings(project_path)
+            self.get_novel(settings)
+        except Exception as error:
+            errors.append(str(error))
+        return errors
 
     def get_novel(self, settings: ProjectSettings) -> NovelORM:
         engine = create_sqlite_engine(settings.database_path)

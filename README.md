@@ -1,6 +1,6 @@
 # Novel Translator
 
-CLI local-first để dịch tiểu thuyết tiếng Trung sang tiếng Việt. Mỗi dự án lưu riêng văn bản nguồn, bản dịch, cơ sở dữ liệu SQLite và ngữ cảnh (tên nhân vật, thuật ngữ…) để các chương sau giữ được cách dịch nhất quán.
+Ứng dụng Windows local-first để dịch tiểu thuyết tiếng Trung sang tiếng Việt. Giao diện desktop là workflow chính; CLI vẫn được giữ để bootstrap và tương thích.
 
 ## Yêu cầu
 
@@ -18,6 +18,12 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 novel --help
+```
+
+Để dùng giao diện Windows, cài thêm dependency desktop:
+
+```powershell
+pip install -e ".[desktop]"
 ```
 
 Nếu PowerShell chặn việc kích hoạt môi trường ảo, chạy lệnh sau cho riêng cửa sổ hiện tại rồi kích hoạt lại:
@@ -50,6 +56,25 @@ tien-hiep-demo/
 ```
 
 Từ bước này trở đi, luôn chạy các lệnh `novel` trong thư mục chứa `novel.yaml`.
+
+### Workflow desktop (khuyến nghị)
+
+Chạy app từ bất kỳ thư mục nào:
+
+```powershell
+novel app
+```
+
+Chọn thư mục `tien-hiep-demo` trong màn hình Start / Open. App tự kiểm tra project và chạy migration khi mở project cũ. Các màn hình Dashboard, Source / Chapters, Translation Jobs, Results, Context, Settings và Logs hỗ trợ:
+
+- xem trạng thái chapter/job/conflict và health của project;
+- preview rồi import source;
+- dịch một chapter hoặc một range bằng worker nền, theo dõi chunk progress và resume/force;
+- xem source, prompt đã render, context snapshot, output, diagnostic và metrics của từng model call;
+- chỉnh cấu hình đã validate, lưu DeepSeek key trong Windows Credential Manager qua `keyring`;
+- quản lý glossary/context và export bản dịch hoặc context YAML.
+
+Các lệnh CLI bên dưới vẫn hoạt động cho automation hoặc môi trường không có UI.
 
 ### 2. Kiểm tra hoặc chỉnh cấu hình
 

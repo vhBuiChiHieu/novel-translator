@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 
-from novel_translator.cli import context, export, import_cmd, project, translate
+from novel_translator.cli import context, desktop, export, import_cmd, project, translate
 from novel_translator.infrastructure.project_logging import shutdown_project_logging
 
 app = typer.Typer(no_args_is_help=True, help="Local-first Chinese to Vietnamese novel translator.")
@@ -14,6 +14,7 @@ app.add_typer(export.app, name="export")
 app.add_typer(import_cmd.app, name="import")
 app.add_typer(project.app)
 app.add_typer(translate.app)
+app.add_typer(desktop.app, name="app")
 
 
 @app.callback()

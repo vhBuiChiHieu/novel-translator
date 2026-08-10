@@ -27,6 +27,10 @@ dev = [
   "respx>=0.21",
   "ruff>=0.8",
 ]
+desktop = [
+  "PySide6>=6.7",
+  "keyring>=25.0",
+]
 
 [project.scripts]
 novel = "novel_translator.main:main"

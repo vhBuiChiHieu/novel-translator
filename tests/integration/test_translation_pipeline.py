@@ -10,7 +10,12 @@ from novel_translator.config import load_project_settings
 from novel_translator.infrastructure.model.exceptions import ModelProviderError
 from novel_translator.infrastructure.model.provider import ProviderDiagnostic, ProviderMetrics
 from novel_translator.infrastructure.persistence.database import create_session_factory, create_sqlite_engine
-from novel_translator.infrastructure.persistence.orm.models import EntityORM, TranslationChunkORM, TranslationJobORM
+from novel_translator.infrastructure.persistence.orm.models import (
+    EntityORM,
+    ModelCallORM,
+    TranslationChunkORM,
+    TranslationJobORM,
+)
 from novel_translator.schemas.context_snapshot import ContextSnapshot
 from novel_translator.schemas.translation_request import TranslationRequest
 from novel_translator.schemas.translation_response import TranslationResponse
@@ -134,14 +139,29 @@ def test_translation_uses_configured_v2_prompt_and_records_provenance(
 
     assert len(provider.requests) == 1
     assert "## RESPONSE FORMAT" in provider.requests[0].user_prompt
+    assert "Never emit a key with a null value" in provider.requests[0].user_prompt
     settings = load_project_settings(project)
     with create_session_factory(create_sqlite_engine(settings.database_path))() as session:
         job = session.scalar(select(TranslationJobORM))
         entity = session.scalar(select(EntityORM))
+        chunk = session.scalar(select(TranslationChunkORM))
+        model_call = session.scalar(select(ModelCallORM))
     assert job is not None
     assert job.prompt_version == "translation-v2"
     assert entity is not None
     assert entity.prompt_version == "translation-v2"
+    assert chunk is not None
+    assert model_call is not None
+    update = chunk.raw_model_response_json["context_updates"][0]
+    assert update == {
+        "type": "character",
+        "source": "陆沉",
+        "translation": "Lục Trầm",
+        "aliases": [],
+        "related_entities": [],
+        "confidence": 0.98,
+    }
+    assert model_call.response_json == chunk.raw_model_response_json
 
 
 def test_resume_uses_persisted_prompt_version_after_configuration_changes(

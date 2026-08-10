@@ -100,6 +100,7 @@ def default_yaml(project_name: str) -> dict[str, Any]:
         },
         "context": {**ContextSettings().model_dump(exclude={"minimum_confidence"}), "minimum_confidence": {"auto_confirm": 0.90}},
         "validation": ValidationSettings().model_dump(),
+        "log_level": "INFO",
     }
 
 
@@ -128,7 +129,7 @@ def load_project_settings(project_path: Path, overrides: dict[str, Any] | None =
         "continuity": translation_raw.get("continuity", {}),
         "context": context_raw,
         "validation": raw.get("validation", {}),
-        "log_level": os.getenv("NOVEL_TRANSLATOR_LOG_LEVEL", "INFO"),
+        "log_level": os.getenv("NOVEL_TRANSLATOR_LOG_LEVEL", raw.get("log_level", "INFO")),
         "project_path": project_path,
     }
     if value := os.getenv("NOVEL_TRANSLATOR_OLLAMA_URL"):
@@ -137,6 +138,17 @@ def load_project_settings(project_path: Path, overrides: dict[str, Any] | None =
         data["model"] = {**data["model"], "name": value}
     if value := os.getenv("NOVEL_TRANSLATOR_DEEPSEEK_API_KEY"):
         data["model"] = {**data["model"], "api_key": value}
+    elif data["model"].get("provider", "ollama").lower() == "deepseek":
+        # keyring is optional for CLI-only installations. Missing keyring support
+        # simply preserves the existing environment-variable behavior.
+        try:
+            import keyring
+
+            stored_key = keyring.get_password("novel-translator", data["project_name"])
+        except Exception:
+            stored_key = None
+        if stored_key:
+            data["model"] = {**data["model"], "api_key": stored_key}
     if overrides:
         data.update({key: value for key, value in overrides.items() if value is not None})
     return ProjectSettings.model_validate(data)

@@ -163,6 +163,35 @@ class TranslationChunkORM(TimestampMixin, Base):
     duration_ms: Mapped[int] = mapped_column(default=0)
 
 
+class ModelCallORM(Base):
+    """Immutable-enough audit record for each provider invocation."""
+
+    __tablename__ = "model_call"
+    __table_args__ = (Index("ix_model_call_chunk", "translation_chunk_id", "attempt_number"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    translation_job_id: Mapped[int] = mapped_column(ForeignKey("translation_job.id"), index=True)
+    translation_chunk_id: Mapped[int] = mapped_column(ForeignKey("translation_chunk.id"), index=True)
+    attempt_number: Mapped[int] = mapped_column(Integer)
+    provider: Mapped[str] = mapped_column(String(64))
+    model_name: Mapped[str] = mapped_column(String(255))
+    prompt_version: Mapped[str] = mapped_column(String(128))
+    system_prompt: Mapped[str] = mapped_column(Text)
+    user_prompt: Mapped[str] = mapped_column(Text)
+    source_text: Mapped[str] = mapped_column(Text)
+    context_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    previous_translation_tail: Mapped[str] = mapped_column(Text, default="")
+    response_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    translated_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    diagnostic_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    prompt_hash: Mapped[str] = mapped_column(String(64))
+    prompt_tokens: Mapped[int] = mapped_column(default=0)
+    output_tokens: Mapped[int] = mapped_column(default=0)
+    duration_ms: Mapped[int] = mapped_column(default=0)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
 class ContextConflictORM(Base):
     __tablename__ = "context_conflict"
     __table_args__ = (Index("ix_conflict_novel_status", "novel_id", "status"),)

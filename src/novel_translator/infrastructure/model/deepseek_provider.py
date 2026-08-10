@@ -15,7 +15,7 @@ from novel_translator.infrastructure.model.exceptions import (
     ModelProviderError,
     ModelTimeoutError,
 )
-from novel_translator.infrastructure.model.provider import ProviderDiagnostic, ProviderMetrics
+from novel_translator.infrastructure.model.provider import ProviderAttempt, ProviderDiagnostic, ProviderMetrics
 from novel_translator.schemas.translation_request import TranslationRequest
 from novel_translator.schemas.translation_response import TranslationResponse
 
@@ -29,12 +29,16 @@ class DeepSeekProvider:
         self.client = client or httpx.Client(timeout=settings.request_timeout_seconds)
         self.last_metrics = ProviderMetrics()
         self.last_diagnostic: ProviderDiagnostic | None = None
+        self.last_attempts: list[ProviderAttempt] = []
 
     def translate(self, request: TranslationRequest) -> TranslationResponse:
         self.last_diagnostic = None
+        self.last_metrics = ProviderMetrics()
+        self.last_attempts = []
         if self.settings.api_key is None:
             message = "DeepSeek API key is not configured"
             self.last_diagnostic = error_diagnostic("deepseek", message)
+            self.last_attempts.append(ProviderAttempt(1, "failed", self.last_metrics, self.last_diagnostic))
             raise ModelProviderError(message)
         payload = {
             "model": self.settings.name,
@@ -73,6 +77,9 @@ class DeepSeekProvider:
                     output_tokens=int(usage.get("completion_tokens", 0)),
                     duration_ms=int((time.perf_counter() - started_at) * 1000),
                 )
+                self.last_attempts.append(
+                    ProviderAttempt(attempt + 1, "completed", self.last_metrics, self.last_diagnostic)
+                )
                 return parsed
             except httpx.TimeoutException as error:
                 failure: ModelProviderError = ModelTimeoutError("DeepSeek request timed out")
@@ -102,9 +109,15 @@ class DeepSeekProvider:
                     message,
                     json.dumps(self.last_diagnostic.body, ensure_ascii=False),
                 )
+                self.last_attempts.append(
+                    ProviderAttempt(attempt + 1, "failed", self.last_metrics, self.last_diagnostic)
+                )
                 raise ModelProviderError(message) from error
             except ModelProviderError as error:
                 failure = error
+            self.last_attempts.append(
+                ProviderAttempt(attempt + 1, "failed", self.last_metrics, self.last_diagnostic)
+            )
             diagnostic_body = self.last_diagnostic.body if self.last_diagnostic is not None else None
             if attempt == self.settings.max_retries:
                 logger.error(
