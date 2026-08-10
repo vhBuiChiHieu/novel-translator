@@ -40,7 +40,7 @@ class DeepSeekProvider:
             self.last_diagnostic = error_diagnostic("deepseek", message)
             self.last_attempts.append(ProviderAttempt(1, "failed", self.last_metrics, self.last_diagnostic))
             raise ModelProviderError(message)
-        payload = {
+        payload: dict[str, object] = {
             "model": self.settings.name,
             "messages": [
                 {"role": "system", "content": request.system_prompt},
@@ -48,9 +48,11 @@ class DeepSeekProvider:
             ],
             "stream": False,
             "response_format": {"type": "json_object"},
-            "temperature": self.settings.options.temperature,
-            "top_p": self.settings.options.top_p,
         }
+        if self.settings.options.temperature is not None:
+            payload["temperature"] = self.settings.options.temperature
+        if self.settings.options.top_p is not None:
+            payload["top_p"] = self.settings.options.top_p
         headers = {"Authorization": f"Bearer {self.settings.api_key.get_secret_value()}"}
         endpoint = f"{self._base_url.rstrip('/')}/chat/completions"
         for attempt in range(self.settings.max_retries + 1):

@@ -86,7 +86,7 @@ class ConfigService:
                 "target_language": settings.target_language,
             },
             "genre": settings.genre,
-            "model": settings.model.model_dump(),
+            "model": settings.model.model_dump(exclude_none=True),
             "translation": {
                 "prompt_version": settings.prompt_version,
                 "chunk": settings.chunk.model_dump(),

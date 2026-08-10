@@ -24,10 +24,13 @@ class TranslationSettings(BaseModel):
 
 
 class ModelOptions(BaseModel):
-    temperature: float = 0.2
-    top_p: float = 0.9
-    num_ctx: int = 16384
-    think: bool = False
+    """Provider tuning values, all optional so the provider can use its own defaults."""
+
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    num_ctx: int | None = None
+    think: bool | None = None
 
 
 class ModelSettings(BaseModel):
@@ -92,7 +95,7 @@ def default_yaml(project_name: str) -> dict[str, Any]:
         "project": {"name": project_name},
         "novel": {"title": "", "source_language": "zh", "target_language": "vi"},
         "genre": ["xianxia"],
-        "model": ModelSettings().model_dump(),
+        "model": ModelSettings().model_dump(exclude_none=True),
         "translation": {
             "prompt_version": TranslationSettings().prompt_version,
             "chunk": ChunkSettings().model_dump(),

@@ -4,7 +4,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from novel_translator.config import ModelSettings
+from novel_translator.config import ModelOptions, ModelSettings
 from novel_translator.infrastructure.model.deepseek_provider import DeepSeekProvider
 from novel_translator.infrastructure.model.exceptions import ModelInvalidResponseError, ModelProviderError
 from novel_translator.schemas.context_snapshot import ContextSnapshot
@@ -44,7 +44,12 @@ def test_provider_posts_structured_request_and_collects_metrics() -> None:
             },
         )
 
-    settings = ModelSettings(provider="deepseek", name="deepseek-v4-flash", api_key=SecretStr("token"))
+    settings = ModelSettings(
+        provider="deepseek",
+        name="deepseek-v4-flash",
+        api_key=SecretStr("token"),
+        options=ModelOptions(temperature=0.2, top_p=0.9),
+    )
     provider = DeepSeekProvider(settings, httpx.Client(transport=httpx.MockTransport(handler)))
 
     assert provider.translate(request()).translation == "Bản dịch hợp lệ."

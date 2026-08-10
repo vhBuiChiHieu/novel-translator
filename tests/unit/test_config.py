@@ -30,6 +30,10 @@ def test_default_yaml_does_not_include_api_key() -> None:
     assert "api_key" not in default_yaml("demo")["model"]
 
 
+def test_default_yaml_omits_optional_model_tuning_values() -> None:
+    assert default_yaml("demo")["model"]["options"] == {}
+
+
 def test_loads_translation_prompt_version(tmp_path: Path) -> None:
     (tmp_path / "novel.yaml").write_text(
         "project:\n  name: demo\ntranslation:\n  prompt_version: translation-v2\n",

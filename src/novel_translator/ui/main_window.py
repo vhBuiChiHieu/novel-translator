@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
-from PySide6.QtCore import QSettings, QThreadPool, QUrl
+from PySide6.QtCore import QSettings, Qt, QThreadPool, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -14,7 +15,9 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -22,6 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QStackedWidget,
     QTableWidget,
@@ -33,9 +37,11 @@ from PySide6.QtWidgets import (
 from novel_translator.application.facade import ApplicationFacade
 from novel_translator.application.services.translation_service import TranslationProgress
 
+from .style import APP_STYLESHEET
 from .workers import FunctionWorker
 
 logger = logging.getLogger(__name__)
+WidgetT = TypeVar("WidgetT", bound=QWidget)
 
 
 class MainWindow(QMainWindow):
@@ -49,17 +55,43 @@ class MainWindow(QMainWindow):
         self._selected_job_id: int | None = None
         self._activity_lines: list[str] = []
         self._build_shell()
+        last_project = self.settings_store.value("last_project", "", type=str)
+        if last_project:
+            self.recent_label.setText(f"Last project: {last_project}")
 
     def _build_shell(self) -> None:
         root = QWidget()
+        root.setObjectName("appRoot")
         layout = QHBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        sidebar_panel = QWidget()
+        sidebar_panel.setObjectName("sidebar")
+        sidebar_panel.setFixedWidth(232)
+        sidebar_layout = QVBoxLayout(sidebar_panel)
+        sidebar_layout.setContentsMargins(16, 20, 16, 18)
+        sidebar_layout.setSpacing(4)
+        brand = QLabel("Novel Translator")
+        brand.setObjectName("brand")
+        sidebar_layout.addWidget(brand)
+        brand_caption = QLabel("Local-first translation workspace")
+        brand_caption.setObjectName("brandCaption")
+        sidebar_layout.addWidget(brand_caption)
+        sidebar_layout.addSpacing(26)
+        section = QLabel("WORKSPACE")
+        section.setObjectName("sidebarSection")
+        sidebar_layout.addWidget(section)
         self.sidebar = QListWidget()
-        self.sidebar.setFixedWidth(190)
-        self.sidebar.addItems(["Start / Open", "Dashboard", "Source / Chapters", "Translation Jobs", "Results", "Context", "Settings", "Logs"])
+        self.sidebar.setObjectName("navigation")
+        self.sidebar.addItems(["Open project", "Overview", "Chapters", "Translation", "Results", "Context", "Settings", "Logs"])
         self.sidebar.currentRowChanged.connect(self._select_page)
-        layout.addWidget(self.sidebar)
+        sidebar_layout.addWidget(self.sidebar, 1)
+        footer = QLabel("Novel Translator\nDesktop workspace")
+        footer.setObjectName("brandCaption")
+        sidebar_layout.addWidget(footer)
+        layout.addWidget(sidebar_panel)
         self.pages = QStackedWidget()
+        self.pages.setObjectName("contentArea")
         self.pages.addWidget(self._start_page())
         self.pages.addWidget(self._dashboard_page())
         self.pages.addWidget(self._source_page())
@@ -72,6 +104,52 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         self.sidebar.setCurrentRow(0)
         self.statusBar().showMessage("Open a project to begin")
+
+    def _page_layout(self, subtitle: str, title: str) -> tuple[QWidget, QVBoxLayout]:
+        """Create a consistent page canvas with predictable alignment."""
+        page = QWidget()
+        page.setObjectName("page")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(32, 28, 32, 28)
+        layout.setSpacing(18)
+        heading = QLabel(title)
+        heading.setObjectName("pageTitle")
+        layout.addWidget(heading)
+        if subtitle:
+            description = QLabel(subtitle)
+            description.setObjectName("pageSubtitle")
+            description.setWordWrap(True)
+            layout.addWidget(description)
+        return page, layout
+
+    @staticmethod
+    def _card() -> tuple[QFrame, QVBoxLayout]:
+        card = QFrame()
+        card.setObjectName("card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(14)
+        return card, layout
+
+    @staticmethod
+    def _optional_option(control: WidgetT, label: str) -> tuple[QCheckBox, WidgetT]:
+        """Pair an optional provider parameter with an explicit enable switch."""
+        enabled = QCheckBox(label)
+        control.setEnabled(False)
+        enabled.toggled.connect(control.setEnabled)
+        return enabled, control
+
+    @staticmethod
+    def _configure_table(table: QTableWidget) -> None:
+        table.setAlternatingRowColors(True)
+        table.setShowGrid(False)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(36)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
     def _select_page(self, row: int) -> None:
         self.pages.setCurrentIndex(row)
@@ -91,64 +169,80 @@ class MainWindow(QMainWindow):
             self._refresh_logs()
 
     def _start_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        title = QLabel("Novel Translator")
-        title.setObjectName("pageTitle")
-        layout.addWidget(title)
-        layout.addWidget(QLabel("Open a folder containing novel.yaml and the project database."))
+        page, layout = self._page_layout("Open an existing workspace to import chapters, translate, and export your novel.", "Welcome")
+        card, card_layout = self._card()
+        section_title = QLabel("Open a project")
+        section_title.setObjectName("sectionTitle")
+        card_layout.addWidget(section_title)
+        guidance = QLabel("Select the project folder that contains novel.yaml and the project database.")
+        guidance.setObjectName("muted")
+        guidance.setWordWrap(True)
+        card_layout.addWidget(guidance)
         button = QPushButton("Open project folder…")
+        button.setProperty("role", "primary")
+        button.setMinimumWidth(190)
         button.clicked.connect(self._choose_project)
-        layout.addWidget(button)
+        card_layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignLeft)
         self.recent_label = QLabel("")
-        layout.addWidget(self.recent_label)
+        self.recent_label.setObjectName("muted")
+        card_layout.addWidget(self.recent_label)
+        layout.addWidget(card)
         layout.addStretch()
         return page
 
     def _dashboard_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
+        page, layout = self._page_layout("A concise view of project health and the next action to take.", "Overview")
         self.dashboard_title = QLabel("No project open")
-        self.dashboard_title.setObjectName("pageTitle")
+        self.dashboard_title.setObjectName("sectionTitle")
         layout.addWidget(self.dashboard_title)
         self.dashboard_details = QLabel("Choose Start / Open to open a project.")
+        self.dashboard_details.setObjectName("muted")
         self.dashboard_details.setWordWrap(True)
         layout.addWidget(self.dashboard_details)
         buttons = QHBoxLayout()
         for label, row in (("Import", 2), ("Translate", 3), ("Settings", 6), ("Export", -1)):
             button = QPushButton(label)
+            if label == "Translate":
+                button.setProperty("role", "primary")
             if row >= 0:
                 button.clicked.connect(lambda _checked=False, target=row: self.sidebar.setCurrentRow(target))
             else:
                 button.clicked.connect(self._export_novel)
             buttons.addWidget(button)
-        layout.addLayout(buttons)
+        actions, actions_layout = self._card()
+        actions_title = QLabel("Quick actions")
+        actions_title.setObjectName("sectionTitle")
+        actions_layout.addWidget(actions_title)
+        actions_layout.addLayout(buttons)
+        layout.addWidget(actions)
         layout.addStretch()
         return page
 
     def _source_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
+        page, layout = self._page_layout("Import chapter files, then select a row to inspect the original text.", "Chapters")
+        card, card_layout = self._card()
         top = QHBoxLayout()
         import_button = QPushButton("Choose input folder and preview/import")
+        import_button.setProperty("role", "primary")
         import_button.clicked.connect(self._choose_import)
         top.addWidget(import_button)
         top.addStretch()
-        layout.addLayout(top)
+        card_layout.addLayout(top)
         self.chapter_table = QTableWidget(0, 4)
         self.chapter_table.setHorizontalHeaderLabels(["Chapter", "Status", "Source hash", "Path"])
-        self.chapter_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._configure_table(self.chapter_table)
         self.chapter_table.cellClicked.connect(self._show_chapter)
-        layout.addWidget(self.chapter_table)
+        card_layout.addWidget(self.chapter_table, 1)
         self.source_preview = QPlainTextEdit()
         self.source_preview.setReadOnly(True)
         self.source_preview.setPlaceholderText("Select a chapter to inspect source text")
-        layout.addWidget(self.source_preview, 1)
+        card_layout.addWidget(self.source_preview, 1)
+        layout.addWidget(card, 1)
         return page
 
     def _jobs_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
+        page, layout = self._page_layout("Choose a chapter range and monitor progress without leaving the workspace.", "Translation")
+        controls_card, controls_layout = self._card()
         form = QHBoxLayout()
         self.first_chapter = QSpinBox()
         self.first_chapter.setMinimum(1)
@@ -163,22 +257,26 @@ class MainWindow(QMainWindow):
         form.addWidget(self.resume_check)
         form.addWidget(self.force_check)
         start = QPushButton("Start translation")
+        start.setProperty("role", "primary")
         start.clicked.connect(self._start_translation)
         form.addWidget(start)
         form.addStretch()
-        layout.addLayout(form)
+        controls_layout.addLayout(form)
+        layout.addWidget(controls_card)
+        jobs_card, jobs_layout = self._card()
         self.job_table = QTableWidget(0, 7)
         self.job_table.setHorizontalHeaderLabels(["ID", "Chapter", "Status", "Provider", "Model", "Tokens", "Duration"])
+        self._configure_table(self.job_table)
         self.job_table.cellClicked.connect(self._show_job_results)
-        layout.addWidget(self.job_table)
+        jobs_layout.addWidget(self.job_table, 1)
         self.job_log = QPlainTextEdit()
         self.job_log.setReadOnly(True)
-        layout.addWidget(self.job_log, 1)
+        jobs_layout.addWidget(self.job_log, 1)
+        layout.addWidget(jobs_card, 1)
         return page
 
     def _results_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
+        page, layout = self._page_layout("Inspect the selected job's provider calls and parsed response.", "Results")
         self.results_title = QLabel("Model inspector")
         self.results_title.setObjectName("pageTitle")
         layout.addWidget(self.results_title)
@@ -187,15 +285,17 @@ class MainWindow(QMainWindow):
         refresh.clicked.connect(self._refresh_results)
         controls.addWidget(refresh)
         controls.addStretch()
-        layout.addLayout(controls)
+        card, card_layout = self._card()
+        card_layout.addLayout(controls)
         self.results_text = QPlainTextEdit()
         self.results_text.setReadOnly(True)
-        layout.addWidget(self.results_text)
+        card_layout.addWidget(self.results_text, 1)
+        layout.addWidget(card, 1)
         return page
 
     def _context_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
+        page, layout = self._page_layout("Review translation knowledge captured from your chapters.", "Context")
+        card, card_layout = self._card()
         top = QHBoxLayout()
         self.context_filter = QComboBox()
         self.context_filter.addItems(["all", "character", "location", "organization", "term"])
@@ -209,16 +309,26 @@ class MainWindow(QMainWindow):
         export.clicked.connect(self._export_context)
         top.addWidget(export)
         top.addStretch()
-        layout.addLayout(top)
+        card_layout.addLayout(top)
         self.context_table = QTableWidget(0, 4)
         self.context_table.setHorizontalHeaderLabels(["Type", "Source", "Translation", "Status"])
-        layout.addWidget(self.context_table)
+        self._configure_table(self.context_table)
+        card_layout.addWidget(self.context_table, 1)
+        layout.addWidget(card, 1)
         return page
 
     def _settings_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        self.settings_form = QFormLayout()
+        page, layout = self._page_layout("Configure translation behaviour and provider access for this project.", "Settings")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.viewport().setStyleSheet("background: #f6f8fb;")
+        content = QWidget()
+        content.setObjectName("settingsContent")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 12, 0)
+        content_layout.setSpacing(16)
+
         self.provider_edit = QComboBox()
         self.provider_edit.addItems(["ollama", "deepseek"])
         self.model_edit = QLineEdit()
@@ -237,12 +347,18 @@ class MainWindow(QMainWindow):
         self.temperature_edit = QDoubleSpinBox()
         self.temperature_edit.setRange(0, 2)
         self.temperature_edit.setSingleStep(0.05)
+        self.temperature_enabled, self.temperature_edit = self._optional_option(self.temperature_edit, "Temperature")
         self.top_p_edit = QDoubleSpinBox()
         self.top_p_edit.setRange(0, 1)
         self.top_p_edit.setSingleStep(0.05)
+        self.top_p_enabled, self.top_p_edit = self._optional_option(self.top_p_edit, "Top-p")
+        self.top_k_edit = QSpinBox()
+        self.top_k_edit.setRange(1, 1000)
+        self.top_k_enabled, self.top_k_edit = self._optional_option(self.top_k_edit, "Top-k")
         self.context_size_edit = QSpinBox()
         self.context_size_edit.setRange(256, 262144)
-        self.think_edit = QCheckBox("Enable model thinking")
+        self.context_size_enabled, self.context_size_edit = self._optional_option(self.context_size_edit, "Context size")
+        self.think_edit = QCheckBox("Enable model thinking (Ollama only)")
         self.target_chars_edit = QSpinBox()
         self.target_chars_edit.setRange(100, 1000000)
         self.max_chars_edit = QSpinBox()
@@ -254,39 +370,96 @@ class MainWindow(QMainWindow):
         self.tail_paragraphs_edit.setRange(0, 100)
         self.log_level_edit = QComboBox()
         self.log_level_edit.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
-        self.settings_form.addRow("Project title", self.title_edit)
-        self.settings_form.addRow("Source language", self.source_language_edit)
-        self.settings_form.addRow("Target language", self.target_language_edit)
-        self.settings_form.addRow("Provider", self.provider_edit)
-        self.settings_form.addRow("Model", self.model_edit)
-        self.settings_form.addRow("Base URL", self.base_url_edit)
-        self.settings_form.addRow("Prompt version", self.prompt_version_edit)
-        self.settings_form.addRow("Timeout (seconds)", self.timeout_edit)
-        self.settings_form.addRow("Max retries", self.retries_edit)
-        self.settings_form.addRow("Temperature", self.temperature_edit)
-        self.settings_form.addRow("Top-p", self.top_p_edit)
-        self.settings_form.addRow("Context size", self.context_size_edit)
-        self.settings_form.addRow("Thinking", self.think_edit)
-        self.settings_form.addRow("Chunk target chars", self.target_chars_edit)
-        self.settings_form.addRow("Chunk max chars", self.max_chars_edit)
-        self.settings_form.addRow("Chunk min chars", self.min_chars_edit)
-        self.settings_form.addRow("Continuity", self.continuity_edit)
-        self.settings_form.addRow("Tail paragraphs", self.tail_paragraphs_edit)
-        self.settings_form.addRow("Log level", self.log_level_edit)
-        self.settings_form.addRow("DeepSeek API key", self.api_key_edit)
-        layout.addLayout(self.settings_form)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(16)
+        project_card, project_layout = self._card()
+        project_title = QLabel("Project")
+        project_title.setObjectName("sectionTitle")
+        project_layout.addWidget(project_title)
+        project_form = QFormLayout()
+        project_form.setVerticalSpacing(10)
+        project_form.addRow("Title", self.title_edit)
+        project_form.addRow("Source language", self.source_language_edit)
+        project_form.addRow("Target language", self.target_language_edit)
+        project_form.addRow("Prompt version", self.prompt_version_edit)
+        project_form.addRow("Log level", self.log_level_edit)
+        project_layout.addLayout(project_form)
+        top_row.addWidget(project_card, 1)
+
+        provider_card, provider_layout = self._card()
+        provider_title = QLabel("Provider connection")
+        provider_title.setObjectName("sectionTitle")
+        provider_layout.addWidget(provider_title)
+        provider_form = QFormLayout()
+        provider_form.setVerticalSpacing(10)
+        provider_form.addRow("Provider", self.provider_edit)
+        provider_form.addRow("Model", self.model_edit)
+        provider_form.addRow("Base URL", self.base_url_edit)
+        provider_form.addRow("Timeout (seconds)", self.timeout_edit)
+        provider_form.addRow("Max retries", self.retries_edit)
+        provider_form.addRow("DeepSeek API key", self.api_key_edit)
+        provider_layout.addLayout(provider_form)
+        top_row.addWidget(provider_card, 1)
+        content_layout.addLayout(top_row)
+
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(16)
+        translation_card, translation_layout = self._card()
+        translation_title = QLabel("Translation flow")
+        translation_title.setObjectName("sectionTitle")
+        translation_layout.addWidget(translation_title)
+        translation_form = QFormLayout()
+        translation_form.setVerticalSpacing(10)
+        translation_form.addRow("Target chars", self.target_chars_edit)
+        translation_form.addRow("Maximum chars", self.max_chars_edit)
+        translation_form.addRow("Minimum chars", self.min_chars_edit)
+        translation_form.addRow("Continuity", self.continuity_edit)
+        translation_form.addRow("Tail paragraphs", self.tail_paragraphs_edit)
+        translation_layout.addLayout(translation_form)
+        bottom_row.addWidget(translation_card, 1)
+
+        options_card, options_layout = self._card()
+        options_title = QLabel("Model options")
+        options_title.setObjectName("sectionTitle")
+        options_layout.addWidget(options_title)
+        hint = QLabel("Select only the options you want to send. Unselected values use the provider default and are omitted from novel.yaml.")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        options_layout.addWidget(hint)
+        options_form = QFormLayout()
+        options_form.setVerticalSpacing(10)
+        options_form.addRow(self.temperature_enabled, self.temperature_edit)
+        options_form.addRow(self.top_p_enabled, self.top_p_edit)
+        options_form.addRow(self.top_k_enabled, self.top_k_edit)
+        options_form.addRow(self.context_size_enabled, self.context_size_edit)
+        options_form.addRow("", self.think_edit)
+        options_layout.addLayout(options_form)
+        bottom_row.addWidget(options_card, 1)
+        content_layout.addLayout(bottom_row)
+        actions_card, actions_layout = self._card()
+        actions_title = QLabel("Apply changes")
+        actions_title.setObjectName("sectionTitle")
+        actions_layout.addWidget(actions_title)
+        actions = QHBoxLayout()
         save = QPushButton("Validate and save settings")
+        save.setProperty("role", "primary")
         save.clicked.connect(self._save_settings)
-        layout.addWidget(save)
+        actions.addWidget(save)
         check = QPushButton("Check provider configuration")
         check.clicked.connect(self._check_provider_config)
-        layout.addWidget(check)
-        layout.addStretch()
+        actions.addWidget(check)
+        actions.addStretch()
+        actions_layout.addLayout(actions)
+        content_layout.addWidget(actions_card)
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
         return page
 
     def _logs_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
+        page, layout = self._page_layout("Recent file logs and actions performed in this desktop session.", "Logs")
+        card, card_layout = self._card()
         controls = QHBoxLayout()
         refresh = QPushButton("Refresh logs")
         refresh.clicked.connect(self._refresh_logs)
@@ -295,10 +468,11 @@ class MainWindow(QMainWindow):
         open_folder.clicked.connect(self._open_logs_folder)
         controls.addWidget(open_folder)
         controls.addStretch()
-        layout.addLayout(controls)
+        card_layout.addLayout(controls)
         self.logs_text = QPlainTextEdit()
         self.logs_text.setReadOnly(True)
-        layout.addWidget(self.logs_text)
+        card_layout.addWidget(self.logs_text, 1)
+        layout.addWidget(card, 1)
         return page
 
     def _choose_project(self) -> None:
@@ -511,10 +685,16 @@ class MainWindow(QMainWindow):
         self.prompt_version_edit.setCurrentText(settings.prompt_version)
         self.timeout_edit.setValue(settings.model.request_timeout_seconds)
         self.retries_edit.setValue(settings.model.max_retries)
-        self.temperature_edit.setValue(settings.model.options.temperature)
-        self.top_p_edit.setValue(settings.model.options.top_p)
-        self.context_size_edit.setValue(settings.model.options.num_ctx)
-        self.think_edit.setChecked(settings.model.options.think)
+        options = settings.model.options
+        self.temperature_edit.setValue(options.temperature if options.temperature is not None else 0.2)
+        self.temperature_enabled.setChecked(options.temperature is not None)
+        self.top_p_edit.setValue(options.top_p if options.top_p is not None else 0.9)
+        self.top_p_enabled.setChecked(options.top_p is not None)
+        self.top_k_edit.setValue(options.top_k if options.top_k is not None else 40)
+        self.top_k_enabled.setChecked(options.top_k is not None)
+        self.context_size_edit.setValue(options.num_ctx if options.num_ctx is not None else 16384)
+        self.context_size_enabled.setChecked(options.num_ctx is not None)
+        self.think_edit.setChecked(options.think is True)
         self.target_chars_edit.setValue(settings.chunk.target_chars)
         self.max_chars_edit.setValue(settings.chunk.max_chars)
         self.min_chars_edit.setValue(settings.chunk.min_chars)
@@ -549,10 +729,11 @@ class MainWindow(QMainWindow):
                         "request_timeout_seconds": self.timeout_edit.value(),
                         "max_retries": self.retries_edit.value(),
                         "options": {
-                            "temperature": self.temperature_edit.value(),
-                            "top_p": self.top_p_edit.value(),
-                            "num_ctx": self.context_size_edit.value(),
-                            "think": self.think_edit.isChecked(),
+                            "temperature": self.temperature_edit.value() if self.temperature_enabled.isChecked() else None,
+                            "top_p": self.top_p_edit.value() if self.top_p_enabled.isChecked() else None,
+                            "top_k": self.top_k_edit.value() if self.top_k_enabled.isChecked() else None,
+                            "num_ctx": self.context_size_edit.value() if self.context_size_enabled.isChecked() else None,
+                            "think": True if self.think_edit.isChecked() else None,
                         },
                     },
                 }
@@ -602,11 +783,7 @@ class MainWindow(QMainWindow):
 def run_window() -> int:
     existing_app = QApplication.instance()
     app = existing_app if isinstance(existing_app, QApplication) else QApplication([])
-    app.setStyleSheet(
-        "QListWidget { background: #20242b; color: #e9edf1; padding: 8px; }"
-        "QListWidget::item { padding: 10px; } QListWidget::item:selected { background: #3b82f6; }"
-        "#pageTitle { font-size: 24px; font-weight: 600; padding-bottom: 8px; }"
-    )
+    app.setStyleSheet(APP_STYLESHEET)
     window = MainWindow()
     window.show()
     return app.exec()

@@ -33,7 +33,7 @@ class OllamaProvider:
         self.last_diagnostic = None
         self.last_metrics = ProviderMetrics()
         self.last_attempts = []
-        payload = {
+        payload: dict[str, object] = {
             "model": self.settings.name,
             "messages": [
                 {"role": "system", "content": request.system_prompt},
@@ -41,9 +41,10 @@ class OllamaProvider:
             ],
             "format": TranslationResponse.model_json_schema(),
             "stream": False,
-            "think": self.settings.options.think,
-            "options": self.settings.options.model_dump(exclude={"think"}),
+            "options": self.settings.options.model_dump(exclude={"think"}, exclude_none=True),
         }
+        if self.settings.options.think is not None:
+            payload["think"] = self.settings.options.think
         endpoint = f"{self.settings.base_url.rstrip('/')}/api/chat"
         for attempt in range(self.settings.max_retries + 1):
             try:
