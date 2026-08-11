@@ -301,14 +301,17 @@ class MainWindow(QMainWindow):
         return page
 
     def _context_page(self) -> QWidget:
-        page, layout = self._page_layout("Review translation knowledge captured from your chapters.", "Context")
+        page, layout = self._page_layout(
+            "Browse every table in this project's database. This viewer is read-only; select a row to see its complete content.",
+            "Context",
+        )
         card, card_layout = self._card()
         top = QHBoxLayout()
-        self.context_filter = QComboBox()
-        self.context_filter.addItems(["all", "character", "location", "organization", "term"])
-        self.context_filter.currentTextChanged.connect(self._refresh_context)
-        top.addWidget(QLabel("Type"))
-        top.addWidget(self.context_filter)
+        self.context_table_selector = QComboBox()
+        self.context_table_selector.setMinimumWidth(230)
+        self.context_table_selector.currentTextChanged.connect(self._refresh_database_table)
+        top.addWidget(QLabel("Database table"))
+        top.addWidget(self.context_table_selector)
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(self._refresh_context)
         top.addWidget(refresh)
@@ -317,10 +320,20 @@ class MainWindow(QMainWindow):
         top.addWidget(export)
         top.addStretch()
         card_layout.addLayout(top)
-        self.context_table = QTableWidget(0, 4)
-        self.context_table.setHorizontalHeaderLabels(["Type", "Source", "Translation", "Status"])
+        self.context_table_info = QLabel("Open a project to browse its database.")
+        self.context_table_info.setObjectName("muted")
+        card_layout.addWidget(self.context_table_info)
+        self.context_table = QTableWidget(0, 0)
         self._configure_table(self.context_table)
-        card_layout.addWidget(self.context_table, 1)
+        self.context_table.horizontalHeader().setStretchLastSection(False)
+        self.context_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.context_table.cellClicked.connect(self._show_database_row)
+        card_layout.addWidget(self.context_table, 2)
+        self.context_row_detail = QPlainTextEdit()
+        self.context_row_detail.setReadOnly(True)
+        self.context_row_detail.setPlaceholderText("Select a row to inspect every field, including long text and JSON.")
+        card_layout.addWidget(self.context_row_detail, 1)
+        self._context_database_rows: list[dict[str, str]] = []
         layout.addWidget(card, 1)
         return page
 
@@ -702,12 +715,57 @@ class MainWindow(QMainWindow):
     def _refresh_context(self) -> None:
         if not self.facade:
             return
-        selected = self.context_filter.currentText()
-        rows = self.facade.list_context(None if selected == "all" else selected)
-        self.context_table.setRowCount(len(rows))
-        for row, item in enumerate(rows):
-            for column, value in enumerate([item.context_type, item.source, item.translation or "", item.status]):
-                self.context_table.setItem(row, column, QTableWidgetItem(value))
+        current = self.context_table_selector.currentText()
+        tables = self.facade.list_database_tables()
+        signals_were_blocked = self.context_table_selector.blockSignals(True)
+        self.context_table_selector.clear()
+        self.context_table_selector.addItems(tables)
+        if current in tables:
+            self.context_table_selector.setCurrentText(current)
+        self.context_table_selector.blockSignals(signals_were_blocked)
+        self._refresh_database_table()
+
+    def _refresh_database_table(self) -> None:
+        if not self.facade:
+            return
+        table_name = self.context_table_selector.currentText()
+        if not table_name:
+            self.context_table.clear()
+            self.context_table.setRowCount(0)
+            self.context_table.setColumnCount(0)
+            self.context_table_info.setText("This project database has no tables yet.")
+            self.context_row_detail.clear()
+            self._context_database_rows = []
+            return
+        try:
+            table = self.facade.get_database_table(table_name)
+            self._context_database_rows = table.rows
+            self.context_table.clear()
+            self.context_table.setColumnCount(len(table.columns))
+            self.context_table.setHorizontalHeaderLabels(table.columns)
+            self.context_table.setRowCount(len(table.rows))
+            for row_index, row in enumerate(table.rows):
+                for column_index, column_name in enumerate(table.columns):
+                    value = row[column_name]
+                    cell = QTableWidgetItem(value)
+                    cell.setToolTip(value)
+                    self.context_table.setItem(row_index, column_index, cell)
+                    self.context_table.setColumnWidth(column_index, 180)
+            self.context_table_info.setText(f"{table.name}: {len(table.rows)} row(s), {len(table.columns)} column(s)")
+            self.context_row_detail.clear()
+        except Exception as error:
+            self._context_database_rows = []
+            self.context_table.setRowCount(0)
+            self.context_table.setColumnCount(0)
+            self.context_row_detail.clear()
+            self._show_error(str(error))
+
+    def _show_database_row(self, row: int, _column: int) -> None:
+        if 0 <= row < len(self._context_database_rows):
+            values = self._context_database_rows[row]
+            self.context_row_detail.setPlainText(
+                "\n\n".join(f"{column_name}\n{'─' * len(column_name)}\n{value}" for column_name, value in values.items())
+            )
 
     def _load_settings_form(self) -> None:
         if not self.facade:

@@ -22,14 +22,15 @@
 - `schemas/` — Pydantic model I/O; `ContextUpdate` and `TranslationResponse` are the structured model-output contract.
 - `prompts/translation_v*.jinja2` — immutable versioned templates; select them through `translation.prompt_version`, persist the version on new jobs, and render resumed jobs with their persisted version.
 - `infrastructure/model/diagnostics.py` — sanitize provider response diagnostics before they are logged or persisted; never log credentials.
-- `cli/` — Typer interface; commands other than `init` require the current directory to contain `novel.yaml`.
+- `cli/` — Typer bootstrap interface; `novel init <name>` is the only CLI command.
 - `ui/` — native desktop application; long-running import, translation, and export work must run in `FunctionWorker`, while widget updates stay on the UI thread.
 - `tests/unit`, `tests/integration`, `tests/provider` — core logic, project/SQLite flow, and mocked model-provider HTTP tests.
 
 ## Key runtime behavior
 
 - `novel init <name>` — creates `./<name>`; use `cd <name>` before import, translation, context, or export commands.
-- `novel app` — opens the desktop UI; install it with `pip install -e ".[desktop,dev]"` when PySide6/keyring are not already installed.
+- `novel-translator` — opens the desktop UI; install it with `pip install -e ".[desktop,dev]"` when PySide6/keyring are not already installed.
+- Import, translation, context management, and export are UI-only workflows.
 - `translation_service.py` — process chunks sequentially, emit progress/project logs, persist context snapshots/metrics, and use a final transaction for chunk response, context merges, conflicts, and completion state.
 - Provider failures — log the sanitized raw response before retrying or failing; failed chunks persist the final diagnostic in `raw_model_response_json`.
 - `domain/context/merger.py` — confirmed mappings are authoritative; translation conflicts create records rather than overwrite mappings.

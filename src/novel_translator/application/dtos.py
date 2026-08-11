@@ -100,6 +100,14 @@ class ContextItemDTO(BaseModel):
     status: str
 
 
+class DatabaseTableDTO(BaseModel):
+    """A read-only, display-friendly view of one project database table."""
+
+    name: str
+    columns: list[str]
+    rows: list[dict[str, str]]
+
+
 class ConflictDTO(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

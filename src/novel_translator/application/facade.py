@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import MetaData, Table, inspect, select
 
 from novel_translator.application.dtos import (
     ChapterDTO,
@@ -11,6 +12,7 @@ from novel_translator.application.dtos import (
     ConflictDTO,
     ContextItemDTO,
     DashboardDTO,
+    DatabaseTableDTO,
     ModelCallDTO,
     TranslationChunkDTO,
     TranslationJobDTO,
@@ -180,6 +182,44 @@ class ApplicationFacade:
                     for item in db_session.scalars(term_statement)
                 )
         return sorted(rows, key=lambda item: (item.context_type, item.source))
+
+    def list_database_tables(self) -> list[str]:
+        """List project-local SQLite tables that can be inspected in the desktop UI."""
+        engine = create_sqlite_engine(self.session.settings.database_path)
+        try:
+            return sorted(inspect(engine).get_table_names())
+        finally:
+            engine.dispose()
+
+    def get_database_table(self, table_name: str) -> DatabaseTableDTO:
+        """Return every cell in one known project table as safe display strings."""
+        engine = create_sqlite_engine(self.session.settings.database_path)
+        try:
+            if table_name not in inspect(engine).get_table_names():
+                raise ValueError(f"Unknown database table: {table_name}")
+            table = Table(table_name, MetaData(), autoload_with=engine)
+            with engine.connect() as connection:
+                statement = select(table)
+                if table.primary_key.columns:
+                    statement = statement.order_by(*table.primary_key.columns)
+                result = connection.execute(statement)
+                rows = [
+                    {column: self._database_display_value(value) for column, value in row._mapping.items()}
+                    for row in result
+                ]
+            return DatabaseTableDTO(name=table_name, columns=[column.name for column in table.columns], rows=rows)
+        finally:
+            engine.dispose()
+
+    @staticmethod
+    def _database_display_value(value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+        if isinstance(value, bytes):
+            return value.hex()
+        return str(value)
 
     def list_conflicts(self) -> list[ConflictDTO]:
         return [ConflictDTO.model_validate(row) for row in ContextService(self.session).conflicts()]

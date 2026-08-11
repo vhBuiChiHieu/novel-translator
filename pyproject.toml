@@ -35,6 +35,9 @@ desktop = [
 [project.scripts]
 novel = "novel_translator.main:main"
 
+[project.gui-scripts]
+novel-translator = "novel_translator.ui.app:run_desktop"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/novel_translator"]
 

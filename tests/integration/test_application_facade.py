@@ -32,6 +32,10 @@ def test_facade_opens_project_from_explicit_path_and_exposes_audit(tmp_path: Pat
 
     facade.upsert_context("character", "第一章", "Chương Một")
     assert facade.list_context("character")[0].translation == "Chương Một"
+    assert "entity" in facade.list_database_tables()
+    entity_table = facade.get_database_table("entity")
+    assert entity_table.columns[:3] == ["id", "novel_id", "entity_type"]
+    assert entity_table.rows[0]["source_name"] == "第一章"
     facade.update_settings({"model": {"name": "test-model"}})
     assert facade.session.settings.model.name == "test-model"
 
