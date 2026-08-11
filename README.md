@@ -1,6 +1,6 @@
 # Novel Translator
 
-Ứng dụng Windows local-first để dịch tiểu thuyết tiếng Trung sang tiếng Việt. Giao diện web local là workflow mới; PySide6 vẫn được giữ trong giai đoạn chuyển tiếp. CLI `novel` chỉ dùng để tạo project mới.
+Ứng dụng Windows local-first để dịch tiểu thuyết tiếng Trung sang tiếng Việt. Giao diện web local là workflow chính; PySide6 vẫn được giữ trong giai đoạn chuyển tiếp.
 
 ## Yêu cầu
 
@@ -35,14 +35,15 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 Ví dụ dưới đây dùng mô hình mặc định `qwen3:14b`. Hãy bảo đảm Ollama đang chạy và mô hình này đã được tải về trước khi dịch.
 
-### 1. Tạo dự án
+### 1. Mở một project
+
+`novel-web` mở project đã có `novel.yaml` và database. Project Picker cũng cho phép tạo project mới bằng cách nhập thư mục cha và tên project. Có thể mở project có sẵn trực tiếp bằng `--project`:
 
 ```powershell
-novel init tien-hiep-demo
-cd tien-hiep-demo
+novel-web --project C:\path\to\tien-hiep-demo
 ```
 
-Lệnh tạo cấu trúc sau:
+Một project hợp lệ có cấu trúc:
 
 ```text
 tien-hiep-demo/
@@ -53,8 +54,6 @@ tien-hiep-demo/
 ├── exports/            # bản ghép và ngữ cảnh xuất ra
 └── logs/               # nhật ký chạy
 ```
-
-Từ bước này trở đi, luôn chạy các lệnh `novel` trong thư mục chứa `novel.yaml`.
 
 ### Mở ứng dụng desktop
 

@@ -2,7 +2,7 @@
 
 ## Tech stack
 
-- Python 3.12 with src-layout packaging; CLI entry point is `novel`.
+- Python 3.12 with src-layout packaging; the local web entry point is `novel-web`.
 - Typer — command-line interface; Pydantic 2 + pydantic-settings — validated schemas and configuration.
 - SQLite + SQLAlchemy 2.x — local persistence; Alembic — production schema migrations.
 - Ollama `/api/chat` and DeepSeek Chat Completions + httpx — model providers; model output is validated as Pydantic data.
@@ -23,7 +23,7 @@
 - `schemas/` — Pydantic model I/O; `ContextUpdate` and `TranslationResponse` are the structured model-output contract.
 - `prompts/translation_v*.jinja2` — immutable versioned templates; select them through `translation.prompt_version`, persist the version on new jobs, and render resumed jobs with their persisted version.
 - `infrastructure/model/diagnostics.py` — sanitize provider response diagnostics before they are logged or persisted; never log credentials.
-- `cli/` — Typer bootstrap interface; `novel init <name>` is the only CLI command.
+- `web/` — FastAPI local web adapter and the `novel-web` launcher; the legacy `novel` CLI has been removed.
 - `ui/` — native desktop application; long-running import, translation, and export work must run in `FunctionWorker`, while widget updates stay on the UI thread.
 - `src/novel_translator/web/` — local FastAPI adapter; routes use `ApplicationFacade`/`ProjectSession` and serializers, and must not access SQLAlchemy ORM objects directly.
 - `src/novel_translator/web/runtime.py` — process-scoped project/session runtime, one mutation queue, background operations, cancellation boundaries, and SSE event replay.
@@ -34,9 +34,8 @@
 
 ## Key runtime behavior
 
-- `novel init <name>` — creates `./<name>`; use `cd <name>` before import, translation, context, or export commands.
 - `novel-translator` — opens the desktop UI; install it with `pip install -e ".[desktop,dev]"` when PySide6/keyring are not already installed.
-- `novel-web` — starts the local web UI on `127.0.0.1`; with no `--project`, the browser opens the project picker and the user enters an absolute path containing `novel.yaml`. `--project <path>` opens a project directly.
+- `novel-web` — starts the local web UI on `127.0.0.1`; with no `--project`, the browser opens the project picker where the user can open an existing absolute path or create a project under a parent directory. `--project <path>` opens a project directly.
 - Install web dependencies with `pip install -e "[web,dev]"`; use `novel-web --no-open` in automated/headless environments.
 - Import, translation, context management, and export are UI-only workflows exposed by both the desktop and local web UIs.
 - The web launch token is one-time; subsequent API access requires the local app token/session cookie. Do not add network binding, CORS, API docs, credential values, or unredacted provider diagnostics.

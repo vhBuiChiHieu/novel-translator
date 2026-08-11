@@ -38,7 +38,6 @@ web = [
 ]
 
 [project.scripts]
-novel = "novel_translator.main:main"
 novel-web = "novel_translator.web.cli:main"
 
 [project.gui-scripts]

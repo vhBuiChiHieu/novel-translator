@@ -208,6 +208,28 @@ class WebRuntime:
             self._startup_error = []
             self._recent_projects = [project_path, *(item for item in self._recent_projects if item != project_path)][:10]
 
+    def create_project(self, parent: Path, name: str) -> Path:
+        if not parent.expanduser().is_absolute():
+            raise WebError(422, "PROJECT_PARENT_INVALID", "Project parent path must be absolute.")
+        parent_path = parent.expanduser().resolve()
+        if not parent_path.is_dir():
+            raise WebError(422, "PROJECT_PARENT_INVALID", "Project parent directory does not exist.")
+        if name != name.strip() or name in {".", ".."} or Path(name).name != name:
+            raise WebError(422, "PROJECT_NAME_INVALID", "Project name must be a single folder name.")
+        if any(character in name for character in '<>:"/\\|?*'):
+            raise WebError(422, "PROJECT_NAME_INVALID", "Project name contains invalid path characters.")
+        with self._lock:
+            self._raise_if_busy()
+        project_path = parent_path / name
+        try:
+            ProjectService().init(parent_path, name)
+        except FileExistsError as error:
+            raise WebError(409, "PROJECT_EXISTS", "A project with this name already exists.") from error
+        except OSError as error:
+            raise WebError(422, "PROJECT_CREATE_FAILED", "The project could not be created.") from error
+        self.open_project(project_path)
+        return project_path
+
     def current_facade(self) -> ApplicationFacade:
         with self._lock:
             path = self._project_path

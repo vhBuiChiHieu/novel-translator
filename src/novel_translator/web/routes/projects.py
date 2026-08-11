@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, status
 
 from novel_translator.web.dependencies import require_session
 from novel_translator.web.runtime import WebRuntime
-from novel_translator.web.schemas import CurrentProjectResponse, OperationResponse, ProjectPathRequest, ResetRequest
+from novel_translator.web.schemas import CreateProjectRequest, CurrentProjectResponse, OperationResponse, ProjectPathRequest, ResetRequest
 from novel_translator.web.serializers import safe_dashboard
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
@@ -32,6 +32,15 @@ def open_project(request: ProjectPathRequest, runtime: WebRuntime = Depends(requ
     runtime.open_project(path)
     facade = runtime.current_facade()
     return CurrentProjectResponse(open=True, project=facade.session.novel, path=str(path.resolve()))
+
+
+@router.post("/create", response_model=CurrentProjectResponse, status_code=status.HTTP_201_CREATED)
+def create_project(request: CreateProjectRequest, runtime: WebRuntime = Depends(require_session)) -> CurrentProjectResponse:
+    from pathlib import Path
+
+    path = runtime.create_project(Path(request.parent_path), request.name)
+    facade = runtime.current_facade()
+    return CurrentProjectResponse(open=True, project=facade.session.novel, path=str(path))
 
 
 @router.post("/reset", response_model=OperationResponse, status_code=status.HTTP_202_ACCEPTED)

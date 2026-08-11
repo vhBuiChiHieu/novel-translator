@@ -34,6 +34,34 @@ def test_web_bootstrap_project_and_dashboard() -> None:
             assert "secret" not in settings.text.lower()
 
 
+def test_web_creates_and_opens_project() -> None:
+    with TemporaryDirectory() as temp:
+        runtime = WebRuntime()
+        with authenticated_client(runtime) as client:
+            response = client.post("/api/v1/projects/create", json={"parent_path": temp, "name": "created-web"})
+
+            assert response.status_code == 201
+            project_path = Path(response.json()["path"])
+            assert project_path == Path(temp) / "created-web"
+            assert (project_path / "novel.yaml").is_file()
+            assert (project_path / "data" / "novel.db").is_file()
+            assert client.get("/api/v1/projects/current").json()["project"]["project_name"] == "created-web"
+
+            duplicate = client.post("/api/v1/projects/create", json={"parent_path": temp, "name": "created-web"})
+            assert duplicate.status_code == 409
+            assert duplicate.json()["error"]["code"] == "PROJECT_EXISTS"
+
+
+def test_web_rejects_invalid_project_name() -> None:
+    with TemporaryDirectory() as temp:
+        runtime = WebRuntime()
+        with authenticated_client(runtime) as client:
+            response = client.post("/api/v1/projects/create", json={"parent_path": temp, "name": "nested\\project"})
+
+            assert response.status_code == 422
+            assert response.json()["error"]["code"] == "PROJECT_NAME_INVALID"
+
+
 def test_web_rejects_non_loopback_origin() -> None:
     runtime = WebRuntime()
     with authenticated_client(runtime) as client:

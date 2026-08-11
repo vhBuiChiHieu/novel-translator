@@ -33,6 +33,11 @@ class ProjectPathRequest(BaseModel):
     path: str
 
 
+class CreateProjectRequest(BaseModel):
+    parent_path: str
+    name: str = Field(min_length=1, max_length=128)
+
+
 class ResetRequest(BaseModel):
     confirm: Literal[True]
 
