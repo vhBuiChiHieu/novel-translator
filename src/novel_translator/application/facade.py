@@ -114,11 +114,16 @@ class ApplicationFacade:
         resume: bool = False,
         force: bool = False,
         on_progress: Callable[[TranslationProgress], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> TranslationJobDTO:
         # Pick up environment/keyring changes made while the desktop app is open.
         self._session = ProjectSession.open(self.session.project_path)
         job = TranslationService(session=self.session).translate(
-            chapter_number, resume=resume, force=force, on_progress=on_progress
+            chapter_number,
+            resume=resume,
+            force=force,
+            on_progress=on_progress,
+            should_cancel=should_cancel,
         )
         return next(row for row in self.list_jobs(chapter_number) if row.id == job.id)
 
@@ -130,9 +135,16 @@ class ApplicationFacade:
         resume: bool = False,
         force: bool = False,
         on_progress: Callable[[TranslationProgress], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> list[TranslationJobDTO]:
         return [
-            self.translate(chapter, resume=resume, force=force, on_progress=on_progress)
+            self.translate(
+                chapter,
+                resume=resume,
+                force=force,
+                on_progress=on_progress,
+                should_cancel=should_cancel,
+            )
             for chapter in range(first, last + 1)
         ]
 

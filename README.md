@@ -1,6 +1,6 @@
 # Novel Translator
 
-Ứng dụng Windows local-first để dịch tiểu thuyết tiếng Trung sang tiếng Việt. Giao diện desktop là workflow chính; CLI chỉ dùng để tạo project mới.
+Ứng dụng Windows local-first để dịch tiểu thuyết tiếng Trung sang tiếng Việt. Giao diện web local là workflow mới; PySide6 vẫn được giữ trong giai đoạn chuyển tiếp. CLI `novel` chỉ dùng để tạo project mới.
 
 ## Yêu cầu
 
@@ -137,6 +137,32 @@ model:
 ```
 
 Đặt API key trong màn hình Settings; ứng dụng lưu nó trong Windows Credential Manager, không ghi vào `novel.yaml`. Adapter DeepSeek dùng endpoint Chat Completions và yêu cầu đầu ra JSON có cấu trúc.
+
+### Mở ứng dụng web local
+
+Cài web extra và chạy:
+
+```powershell
+pip install -e ".[web,dev]"
+novel-web --project C:\path\to\tien-hiep-demo
+```
+
+Server chỉ bind `127.0.0.1`; mặc định chọn port rảnh và mở browser bằng startup token trong URL fragment. Dùng `--no-open` để in URL và tự mở bằng browser:
+
+```powershell
+novel-web --project C:\path\to\tien-hiep-demo --no-open
+```
+
+Web app dùng REST `/api/v1` cho truy vấn/lệnh và SSE `/api/v1/events` cho tiến độ. Startup token đổi lấy cookie `HttpOnly`, không được ghi vào project, SQLite, log hoặc frontend state. DeepSeek API key chỉ đi qua endpoint write-only và keyring; settings API chỉ trả dữ liệu an toàn.
+
+Frontend source nằm trong `web-client/`. Build static artifact vào package bằng:
+
+```powershell
+npm --prefix web-client install
+npm --prefix web-client run build
+```
+
+Artifact build cần được copy vào `src/novel_translator/web/static/` trước khi đóng gói bản phát hành.
 
 ## Xử lý sự cố thường gặp
 

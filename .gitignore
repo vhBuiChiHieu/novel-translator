@@ -36,3 +36,7 @@ Thumbs.db
 .claude.local.md
 .codegraph/
 tests/demo**
+web-client/node_modules/
+web-client/dist/
+web-client/test-results/
+web-client/.last-run.json

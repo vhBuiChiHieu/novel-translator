@@ -59,6 +59,10 @@ class SourceChangedError(Exception):
     pass
 
 
+class TranslationCancelledError(Exception):
+    """Raised when a queued translation is stopped at a chunk boundary."""
+
+
 class TranslationService:
     def __init__(
         self,
@@ -77,6 +81,7 @@ class TranslationService:
         resume: bool = False,
         force: bool = False,
         on_progress: Callable[[TranslationProgress], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> TranslationJobORM:
         active = open_project_session(self.session, self.project_path)
         settings = active.settings
@@ -98,7 +103,7 @@ class TranslationService:
             job_id = job.id
             session.commit()
         provider = self.provider or create_model_provider(settings.model)
-        self._process_job(settings, job_id, chapter_number, provider, on_progress)
+        self._process_job(settings, job_id, chapter_number, provider, on_progress, should_cancel)
         with sessions() as session:
             completed = session.get(TranslationJobORM, job_id)
             assert completed is not None
@@ -157,6 +162,7 @@ class TranslationService:
         chapter_number: int,
         provider: ModelProvider,
         on_progress: Callable[[TranslationProgress], None] | None,
+        should_cancel: Callable[[], bool] | None,
     ) -> None:
         sessions: SessionFactory = create_session_factory(create_sqlite_engine(settings.database_path))
         with sessions() as session:
@@ -189,6 +195,10 @@ class TranslationService:
             with sessions() as session:
                 job = session.get(TranslationJobORM, job_id)
                 assert job is not None
+                if should_cancel is not None and should_cancel():
+                    job.status = JobStatus.PARTIAL.value
+                    session.commit()
+                    raise TranslationCancelledError("Stopping after current chunk")
                 next_chunk = session.scalar(
                     select(TranslationChunkORM)
                     .where(
