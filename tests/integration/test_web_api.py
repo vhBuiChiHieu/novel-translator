@@ -62,6 +62,23 @@ def test_web_rejects_invalid_project_name() -> None:
             assert response.json()["error"]["code"] == "PROJECT_NAME_INVALID"
 
 
+def test_web_picks_directory(monkeypatch, tmp_path) -> None:
+    selected = tmp_path / "picked-project"
+    selected.mkdir()
+    monkeypatch.setattr("novel_translator.web.routes.projects.choose_directory", lambda *, title: selected)
+
+    runtime = WebRuntime()
+    with authenticated_client(runtime) as client:
+        response = client.post("/api/v1/projects/pick", json={"purpose": "project"})
+
+    assert response.status_code == 200
+    assert response.json() == {"path": str(selected.resolve())}
+
+    source_response = client.post("/api/v1/projects/pick", json={"purpose": "source"})
+    assert source_response.status_code == 200
+    assert source_response.json() == {"path": str(selected.resolve())}
+
+
 def test_web_rejects_non_loopback_origin() -> None:
     runtime = WebRuntime()
     with authenticated_client(runtime) as client:

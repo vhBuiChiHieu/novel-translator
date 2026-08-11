@@ -33,6 +33,10 @@ class ProjectPathRequest(BaseModel):
     path: str
 
 
+class DirectoryPickerRequest(BaseModel):
+    purpose: Literal["project", "parent", "source"] = "project"
+
+
 class CreateProjectRequest(BaseModel):
     parent_path: str
     name: str = Field(min_length=1, max_length=128)

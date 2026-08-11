@@ -28,6 +28,7 @@ export const api = {
   health: () => request<{ status: string; version: string }>("/health"),
   current: () => request<{ open: boolean; project?: Novel; path?: string; validation_errors: string[] }>("/projects/current"),
   open: (path: string) => request<{ open: boolean; project: Novel; path: string }>("/projects/open", { method: "POST", body: JSON.stringify({ path }) }),
+  pickDirectory: (purpose: "project" | "parent" | "source") => request<{ path: string | null }>("/projects/pick", { method: "POST", body: JSON.stringify({ purpose }) }),
   create: (parent_path: string, name: string) => request<{ open: boolean; project: Novel; path: string }>("/projects/create", { method: "POST", body: JSON.stringify({ parent_path, name }) }),
   dashboard: () => request<Dashboard>("/dashboard"),
   settings: () => request<Record<string, unknown>>("/settings"),
