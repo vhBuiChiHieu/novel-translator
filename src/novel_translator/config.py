@@ -165,7 +165,7 @@ class ContextSettings(BaseModel):
     max_relationships_per_request: int = 30
     max_facts_per_request: int = 20
     auto_confirm: ContextAutoConfirmSettings = Field(default_factory=ContextAutoConfirmSettings)
-    minimum_confidence: float = 0.90
+    minimum_confidence: float = 0.80
 
 
 class ValidationSettings(BaseModel):
@@ -206,7 +206,7 @@ def default_yaml(project_name: str) -> dict[str, Any]:
             "chunk": ChunkSettings().model_dump(),
             "continuity": ContinuitySettings().model_dump(),
         },
-        "context": {**ContextSettings().model_dump(exclude={"minimum_confidence"}), "minimum_confidence": {"auto_confirm": 0.90}},
+        "context": {**ContextSettings().model_dump(exclude={"minimum_confidence"}), "minimum_confidence": {"auto_confirm": 0.80}},
         "validation": ValidationSettings().model_dump(),
         "log_level": "INFO",
     }
@@ -229,7 +229,7 @@ def load_project_settings(
     context_raw = dict(raw.get("context", {}))
     minimum = context_raw.pop("minimum_confidence", {})
     if isinstance(minimum, dict):
-        context_raw["minimum_confidence"] = minimum.get("auto_confirm", 0.90)
+        context_raw["minimum_confidence"] = minimum.get("auto_confirm", 0.80)
     data: dict[str, Any] = {
         "project_name": raw.get("project", {}).get("name", project_path.name),
         "title": raw.get("novel", {}).get("title", ""),

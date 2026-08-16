@@ -89,7 +89,7 @@ class ContextMerger:
                     status=self._status(update),
                     first_seen_chapter_id=self.chapter_id,
                     first_seen_chunk_id=self.chunk_id,
-                    confidence=update.confidence,
+                    confidence=update.confidence if update.confidence is not None else 0.0,
                 )
             )
             return MergeResult(result.inserted + 1, result.enriched, result.duplicates, result.conflicts)
@@ -132,7 +132,7 @@ class ContextMerger:
                     status=self._status(update),
                     first_seen_chapter_id=self.chapter_id,
                     first_seen_chunk_id=self.chunk_id,
-                    confidence=update.confidence,
+                    confidence=update.confidence if update.confidence is not None else 0.0,
                 )
             )
             return MergeResult(result.inserted + 1, result.enriched, result.duplicates, result.conflicts)

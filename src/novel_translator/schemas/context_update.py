@@ -14,7 +14,7 @@ class ContextUpdate(BaseModel):
     description: str | None = None
     aliases: list[str] = Field(default_factory=list)
     related_entities: list[str] = Field(default_factory=list)
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
     subject: str | None = None
     predicate: str | None = None
