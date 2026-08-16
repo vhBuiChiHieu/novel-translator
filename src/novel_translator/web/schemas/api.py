@@ -58,6 +58,33 @@ class ApiKeyStatus(BaseModel):
     configured: bool
 
 
+class ProviderProfileRequest(BaseModel):
+    profile_id: str | None = None
+    provider: str = "ollama"
+    base_url: str | None = None
+    model: str = "qwen3:14b"
+    request_timeout_seconds: int = Field(default=300, ge=1)
+    max_retries: int = Field(default=2, ge=0)
+    options: dict[str, Any] = Field(default_factory=dict)
+    provider_options: dict[str, Any] = Field(default_factory=dict)
+    credential_ref: str | None = None
+
+
+class ProviderProfilePatch(BaseModel):
+    provider: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+    request_timeout_seconds: int | None = Field(default=None, ge=1)
+    max_retries: int | None = Field(default=None, ge=0)
+    options: dict[str, Any] | None = None
+    provider_options: dict[str, Any] | None = None
+    credential_ref: str | None = None
+
+
+class ProviderCredentialRequest(BaseModel):
+    api_key: str = Field(default="", json_schema_extra={"writeOnly": True})
+
+
 class ImportRequest(BaseModel):
     source_directory: str
 

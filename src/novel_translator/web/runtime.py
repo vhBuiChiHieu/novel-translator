@@ -90,7 +90,7 @@ class EventBroker:
 @dataclass
 class Operation:
     kind: str
-    project_path: Path
+    project_path: Path | None
     chapter_numbers: list[int] = field(default_factory=list)
     operation_id: str = field(default_factory=lambda: str(uuid4()))
     status: str = "queued"
@@ -255,12 +255,13 @@ class WebRuntime:
         kind: str,
         work: Callable[[Operation], object],
         chapter_numbers: list[int] | None = None,
+        allow_without_project: bool = False,
     ) -> Operation:
         with self._lock:
             if self._closed:
                 raise WebError(503, "SERVER_SHUTTING_DOWN", "The local server is shutting down.")
             path = self._project_path
-            if path is None:
+            if path is None and not allow_without_project:
                 raise WebError(409, "PROJECT_NOT_OPEN", "No project is open.")
             self._raise_if_busy()
             operation = Operation(kind=kind, project_path=path, chapter_numbers=chapter_numbers or [])

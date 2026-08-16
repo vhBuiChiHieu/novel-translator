@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 
 from novel_translator.application.facade import ApplicationFacade
 from novel_translator.application.services.translation_service import TranslationProgress
+from novel_translator.domain.model.catalog import model_options_for
 
 from .style import APP_STYLESHEET
 from .workers import FunctionWorker
@@ -350,8 +351,12 @@ class MainWindow(QMainWindow):
         content_layout.setSpacing(16)
 
         self.provider_edit = QComboBox()
-        self.provider_edit.addItems(["ollama", "deepseek"])
+        self.provider_edit.addItems(["ollama", "deepseek", "gemini"])
         self.model_edit = QLineEdit()
+        self.model_preset_edit = QComboBox()
+        self.model_preset_edit.currentIndexChanged.connect(self._apply_model_preset)
+        self.provider_edit.currentTextChanged.connect(self._provider_changed)
+        self.model_preset_label = QLabel("Model preset")
         self.base_url_edit = QLineEdit()
         self.title_edit = QLineEdit()
         self.source_language_edit = QLineEdit()
@@ -414,12 +419,14 @@ class MainWindow(QMainWindow):
         provider_form = QFormLayout()
         provider_form.setVerticalSpacing(10)
         provider_form.addRow("Provider", self.provider_edit)
+        provider_form.addRow(self.model_preset_label, self.model_preset_edit)
         provider_form.addRow("Model", self.model_edit)
         provider_form.addRow("Base URL", self.base_url_edit)
         provider_form.addRow("Timeout (seconds)", self.timeout_edit)
         provider_form.addRow("Max retries", self.retries_edit)
-        provider_form.addRow("DeepSeek API key", self.api_key_edit)
+        provider_form.addRow("Provider API key", self.api_key_edit)
         provider_layout.addLayout(provider_form)
+        self._refresh_model_presets(self.provider_edit.currentText())
         top_row.addWidget(provider_card, 1)
         content_layout.addLayout(top_row)
 
@@ -767,6 +774,31 @@ class MainWindow(QMainWindow):
                 "\n\n".join(f"{column_name}\n{'─' * len(column_name)}\n{value}" for column_name, value in values.items())
             )
 
+    def _provider_changed(self, provider: str) -> None:
+        self._refresh_model_presets(provider)
+        if provider != "ollama":
+            options = model_options_for(provider)
+            if options:
+                self.model_edit.setText(options[0]["id"])
+
+    def _refresh_model_presets(self, provider: str) -> None:
+        options = model_options_for(provider)
+        self.model_preset_edit.blockSignals(True)
+        self.model_preset_edit.clear()
+        if options:
+            self.model_preset_edit.addItem("Choose a model preset…", "")
+            for option in options:
+                self.model_preset_edit.addItem(f"{option['label']} · {option['status']}", option["id"])
+        self.model_preset_edit.setEnabled(bool(options))
+        self.model_preset_label.setVisible(bool(options))
+        self.model_preset_edit.setVisible(bool(options))
+        self.model_preset_edit.blockSignals(False)
+
+    def _apply_model_preset(self, _index: int) -> None:
+        model_id = self.model_preset_edit.currentData()
+        if model_id:
+            self.model_edit.setText(str(model_id))
+
     def _load_settings_form(self) -> None:
         if not self.facade:
             return
@@ -775,7 +807,10 @@ class MainWindow(QMainWindow):
         self.source_language_edit.setText(settings.source_language)
         self.target_language_edit.setText(settings.target_language)
         self.provider_edit.setCurrentText(settings.model.provider)
+        self._refresh_model_presets(settings.model.provider)
         self.model_edit.setText(settings.model.name)
+        preset_index = self.model_preset_edit.findData(settings.model.name)
+        self.model_preset_edit.setCurrentIndex(preset_index if preset_index >= 0 else 0)
         self.base_url_edit.setText(settings.model.base_url)
         self.prompt_version_edit.setCurrentText(settings.prompt_version)
         self.timeout_edit.setValue(settings.model.request_timeout_seconds)
@@ -843,8 +878,8 @@ class MainWindow(QMainWindow):
         if not self.facade:
             return self._show_error("Open a project first")
         settings = self.facade.session.settings
-        if settings.model.provider == "deepseek" and settings.model.api_key is None:
-            return self._show_error("DeepSeek API key is not configured")
+        if settings.model.provider in {"deepseek", "gemini"} and settings.model.api_key is None:
+            return self._show_error(f"{settings.model.provider.title()} API key is not configured")
         self.statusBar().showMessage(
             f"Configuration valid for {settings.model.provider}/{settings.model.name}; connectivity is checked on Start."
         )

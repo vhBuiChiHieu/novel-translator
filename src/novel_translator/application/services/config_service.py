@@ -6,6 +6,7 @@ from typing import Any
 import yaml
 
 from novel_translator.application.project_scope import open_project_session
+from novel_translator.application.services.global_provider_service import GlobalProviderService
 from novel_translator.application.session import ProjectSession
 from novel_translator.config import ProjectSettings, load_project_settings
 from novel_translator.infrastructure.persistence.database import create_session_factory, create_sqlite_engine
@@ -17,12 +18,35 @@ class ConfigService:
 
     def __init__(self, session: ProjectSession | None = None, project_path: Path | None = None) -> None:
         self.session = open_project_session(session, project_path)
+        self.global_providers = GlobalProviderService()
 
     def load(self) -> ProjectSettings:
-        return load_project_settings(self.session.project_path)
+        return load_project_settings(self.session.project_path, use_global=True)
 
     def update(self, updates: dict[str, Any]) -> ProjectSettings:
         current = self.load()
+        model_updates = updates.pop("model", None)
+        if isinstance(model_updates, dict):
+            profile_id = self.global_providers.ensure_project_profile(current.model, current.project_name)
+            profile_data: dict[str, Any] = {}
+            for key, value in model_updates.items():
+                if key == "name":
+                    profile_data["model"] = value
+                elif key == "options" and isinstance(value, dict):
+                    profile_data["options"] = {
+                        option: option_value
+                        for option, option_value in value.items()
+                        if option in {"temperature", "top_p", "top_k", "max_output_tokens"}
+                    }
+                    profile_data["provider_options"] = {
+                        option: option_value
+                        for option, option_value in value.items()
+                        if option in {"num_ctx", "think"}
+                    }
+                elif key in {"provider", "base_url", "request_timeout_seconds", "max_retries", "options", "provider_options", "credential_ref"}:
+                    profile_data[key] = value
+            self.global_providers.update(profile_id, profile_data)
+            current = load_project_settings(self.session.project_path, use_global=True)
         data = current.model_dump(exclude={"project_path"}, mode="python")
         for key, value in updates.items():
             if isinstance(value, dict) and isinstance(data.get(key), dict):
@@ -53,12 +77,8 @@ class ConfigService:
         if not api_key:
             self.clear_api_key()
             return
-        try:
-            import keyring
-
-            keyring.set_password("novel-translator", self.session.settings.project_name, api_key)
-        except ImportError as error:
-            raise RuntimeError("Credential storage requires the desktop/keyring extra") from error
+        profile_id = self.global_providers.settings().active_profile
+        self.global_providers.set_credential(profile_id, api_key)
         # ProjectSession is immutable by design. Reload it so the UI and any
         # subsequent worker see the credential immediately instead of waiting
         # for the next application restart.
@@ -66,11 +86,8 @@ class ConfigService:
 
     def clear_api_key(self) -> None:
         try:
-            import keyring
-        except ImportError:
-            return
-        try:
-            keyring.delete_password("novel-translator", self.session.settings.project_name)
+            profile_id = self.global_providers.settings().active_profile
+            self.global_providers.set_credential(profile_id, "")
         except Exception:
             pass
         self.session = ProjectSession.open(self.session.project_path)
@@ -86,7 +103,6 @@ class ConfigService:
                 "target_language": settings.target_language,
             },
             "genre": settings.genre,
-            "model": settings.model.model_dump(exclude_none=True),
             "translation": {
                 "prompt_version": settings.prompt_version,
                 "chunk": settings.chunk.model_dump(),

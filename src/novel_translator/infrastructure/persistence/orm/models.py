@@ -133,6 +133,8 @@ class TranslationJobORM(TimestampMixin, Base):
     chapter_id: Mapped[int] = mapped_column(ForeignKey("chapter.id"), index=True)
     model_provider: Mapped[str] = mapped_column(String(64))
     model_name: Mapped[str] = mapped_column(String(255))
+    profile_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    config_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     prompt_version: Mapped[str] = mapped_column(String(128))
     status: Mapped[str] = mapped_column(String(32), index=True)
     started_at: Mapped[datetime | None] = mapped_column(nullable=True)

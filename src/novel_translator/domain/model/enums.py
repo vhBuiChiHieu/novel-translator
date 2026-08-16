@@ -48,3 +48,9 @@ class EntityType(StrEnum):
     CHARACTER = "character"
     LOCATION = "location"
     ORGANIZATION = "organization"
+
+
+class ProviderType(StrEnum):
+    OLLAMA = "ollama"
+    DEEPSEEK = "deepseek"
+    GEMINI = "gemini"

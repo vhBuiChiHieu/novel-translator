@@ -6,7 +6,7 @@ import logging
 import httpx
 from pydantic import ValidationError
 
-from novel_translator.config import ModelSettings
+from novel_translator.config import ModelSettings, ProviderProfile
 from novel_translator.infrastructure.model.diagnostics import error_diagnostic, response_diagnostic
 from novel_translator.infrastructure.model.exceptions import (
     ModelConnectionError,
@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaProvider:
-    def __init__(self, settings: ModelSettings, client: httpx.Client | None = None) -> None:
+    def __init__(self, settings: ModelSettings | ProviderProfile, client: httpx.Client | None = None) -> None:
         self.settings = settings
-        self.client = client or httpx.Client(timeout=settings.request_timeout_seconds)
+        self.client = client or httpx.Client(timeout=getattr(settings, "request_timeout_seconds", 300))
         self.last_metrics = ProviderMetrics()
         self.last_diagnostic: ProviderDiagnostic | None = None
         self.last_attempts: list[ProviderAttempt] = []
@@ -33,20 +33,24 @@ class OllamaProvider:
         self.last_diagnostic = None
         self.last_metrics = ProviderMetrics()
         self.last_attempts = []
+        options = self.settings.options.model_dump(exclude={"think"}, exclude_none=True)
+        if "max_output_tokens" in options:
+            options["num_predict"] = options.pop("max_output_tokens")
         payload: dict[str, object] = {
-            "model": self.settings.name,
+            "model": getattr(self.settings, "name", None) or getattr(self.settings, "model"),
             "messages": [
                 {"role": "system", "content": request.system_prompt},
                 {"role": "user", "content": request.user_prompt},
             ],
             "format": TranslationResponse.model_json_schema(),
             "stream": False,
-            "options": self.settings.options.model_dump(exclude={"think"}, exclude_none=True),
+            "options": options,
         }
-        if self.settings.options.think is not None:
-            payload["think"] = self.settings.options.think
-        endpoint = f"{self.settings.base_url.rstrip('/')}/api/chat"
-        for attempt in range(self.settings.max_retries + 1):
+        if getattr(self.settings.options, "think", None) is not None:
+            payload["think"] = getattr(self.settings.options, "think")
+        base_url = getattr(self.settings, "base_url", None) or "http://localhost:11434"
+        endpoint = f"{base_url.rstrip('/')}/api/chat"
+        for attempt in range(getattr(self.settings, "max_retries", 2) + 1):
             try:
                 response = self.client.post(endpoint, json=payload)
                 self.last_diagnostic = response_diagnostic("ollama", response, "Ollama response received")
@@ -107,7 +111,7 @@ class OllamaProvider:
                 ProviderAttempt(attempt + 1, "failed", self.last_metrics, self.last_diagnostic)
             )
             diagnostic_body = self.last_diagnostic.body if self.last_diagnostic is not None else None
-            if attempt == self.settings.max_retries:
+            if attempt == getattr(self.settings, "max_retries", 2):
                 logger.error(
                     "Ollama request failed after %s attempt(s) reason=%s raw_response=%s",
                     attempt + 1,

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import yaml
 from sqlalchemy import select
 
+from novel_translator.application.services.global_provider_service import GlobalProviderService
 from novel_translator.config import ProjectSettings, default_yaml, load_project_settings
 from novel_translator.infrastructure.persistence.database import (
     create_session_factory,
@@ -69,7 +70,9 @@ class ProjectService:
     def load_current(self, path: Path | None = None) -> ProjectSettings:
         project_path = (path or Path.cwd()).resolve()
         try:
-            settings = load_project_settings(project_path)
+            legacy_settings = load_project_settings(project_path, use_global=False)
+            GlobalProviderService().ensure_project_profile(legacy_settings.model, legacy_settings.project_name)
+            settings = load_project_settings(project_path, use_global=True)
         except FileNotFoundError as error:
             raise ProjectNotFoundError(
                 "Current directory is not a novel project. Run this command inside a directory containing novel.yaml."
@@ -109,7 +112,7 @@ class ProjectService:
         if errors:
             return errors
         try:
-            settings = load_project_settings(project_path)
+            settings = load_project_settings(project_path, use_global=True)
             self.get_novel(settings)
         except Exception as error:
             errors.append(str(error))

@@ -19,6 +19,7 @@ from .routes import (
     imports,
     operations,
     projects,
+    providers,
     session,
     settings,
     translations,
@@ -78,6 +79,7 @@ def create_app(runtime: WebRuntime | None = None) -> FastAPI:
     app.include_router(projects.dashboard_router)
     app.include_router(runtime_routes.router)
     app.include_router(settings.router)
+    app.include_router(providers.router)
     app.include_router(imports.router)
     app.include_router(chapters.router)
     app.include_router(translations.router)

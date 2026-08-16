@@ -36,6 +36,8 @@ class TranslationJobDTO(BaseModel):
     chapter_number: int | None = None
     model_provider: str
     model_name: str
+    profile_id: str | None = None
+    config_hash: str | None = None
     prompt_version: str
     status: str
     started_at: datetime | None = None

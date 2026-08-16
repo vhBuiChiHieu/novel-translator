@@ -21,6 +21,7 @@ from novel_translator.application.services.chapter_query_service import ChapterQ
 from novel_translator.application.services.config_service import ConfigService
 from novel_translator.application.services.context_service import ContextService
 from novel_translator.application.services.export_service import ExportService
+from novel_translator.application.services.global_provider_service import GlobalProviderService
 from novel_translator.application.services.import_service import ImportService
 from novel_translator.application.services.model_call_query_service import ModelCallQueryService
 from novel_translator.application.services.project_health_service import ProjectHealthService
@@ -29,6 +30,7 @@ from novel_translator.application.services.translation_job_query_service import 
 from novel_translator.application.services.translation_service import TranslationProgress, TranslationService
 from novel_translator.application.session import ProjectSession
 from novel_translator.config import ProjectSettings
+from novel_translator.infrastructure.model.resolver import ProviderResolver
 from novel_translator.infrastructure.persistence.database import create_session_factory, create_sqlite_engine
 from novel_translator.infrastructure.persistence.orm.models import (
     EntityORM,
@@ -41,6 +43,8 @@ class ApplicationFacade:
 
     def __init__(self, project_path: Path | None = None) -> None:
         self._session: ProjectSession | None = None
+        self._provider_resolver = ProviderResolver()
+        self._global_providers = GlobalProviderService()
         if project_path is not None:
             self.open_project(project_path)
 
@@ -118,7 +122,8 @@ class ApplicationFacade:
     ) -> TranslationJobDTO:
         # Pick up environment/keyring changes made while the desktop app is open.
         self._session = ProjectSession.open(self.session.project_path)
-        job = TranslationService(session=self.session).translate(
+        provider = self._provider_resolver.resolve()
+        job = TranslationService(provider=provider, session=self.session).translate(
             chapter_number,
             resume=resume,
             force=force,

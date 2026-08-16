@@ -5,9 +5,9 @@
 - Python 3.12 with src-layout packaging; the local web entry point is `novel-web`.
 - Typer — command-line interface; Pydantic 2 + pydantic-settings — validated schemas and configuration.
 - SQLite + SQLAlchemy 2.x — local persistence; Alembic — production schema migrations.
-- Ollama `/api/chat` and DeepSeek Chat Completions + httpx — model providers; model output is validated as Pydantic data.
+- Ollama `/api/chat`, DeepSeek Chat Completions, and Gemini `generateContent` + httpx — model providers; model output is validated as Pydantic data.
 - Jinja2 — versioned translation prompts; PyYAML — `novel.yaml` and manual context import/export.
-- PySide6 desktop UI with `QThreadPool` workers; `keyring` stores the DeepSeek credential outside `novel.yaml`.
+- PySide6 desktop UI with `QThreadPool` workers; `keyring` stores cloud-provider credentials outside `novel.yaml`.
 - Local web UI with a FastAPI backend and React/Vite frontend; the web server binds to loopback only.
 - pytest + respx/`httpx.MockTransport` — tests; Ruff and mypy — required static quality checks.
 
@@ -18,15 +18,18 @@
 - `application/facade.py` and `application/session.py` — UI-facing API and immutable project scope; UI code must not access SQLAlchemy models directly.
 - `infrastructure/persistence/` — SQLite/SQLAlchemy adapter and Alembic migration; project databases upgrade through `migrate.py`.
 - `ModelCallORM` records one sanitized audit entry per provider attempt, including rendered prompts, parsed response, metrics, and diagnostics.
-- `infrastructure/model/` — Ollama and DeepSeek HTTP adapters plus the provider factory; adapters must never write to the database.
+- `infrastructure/model/` — Ollama, DeepSeek, and Gemini HTTP adapters plus the provider factory/resolver; adapters must never write to the database.
+- `domain/model/catalog.py` — shared text-model presets for cloud providers; Ollama intentionally has no preset catalog because its models are installed locally.
+- `infrastructure/config/` — global provider settings and OS credential storage; secrets never enter YAML or API responses.
 - `infrastructure/prompting/jinja_prompt_builder.py` — loads and renders the versioned prompt template.
-- `schemas/` — Pydantic model I/O; `ContextUpdate` and `TranslationResponse` are the structured model-output contract.
+- `schemas/` — Pydantic model I/O; provider profiles, model presets, `ContextUpdate`, and `TranslationResponse` are structured contracts.
 - `prompts/translation_v*.jinja2` — immutable versioned templates; select them through `translation.prompt_version`, persist the version on new jobs, and render resumed jobs with their persisted version.
 - `infrastructure/model/diagnostics.py` — sanitize provider response diagnostics before they are logged or persisted; never log credentials.
 - `web/` — FastAPI local web adapter and the `novel-web` launcher; the legacy `novel` CLI has been removed.
 - `ui/` — native desktop application; long-running import, translation, and export work must run in `FunctionWorker`, while widget updates stay on the UI thread.
 - `src/novel_translator/web/` — local FastAPI adapter; routes use `ApplicationFacade`/`ProjectSession` and serializers, and must not access SQLAlchemy ORM objects directly.
 - `src/novel_translator/web/runtime.py` — process-scoped project/session runtime, one mutation queue, background operations, cancellation boundaries, and SSE event replay.
+- `src/novel_translator/web/routes/providers.py` — global provider profile CRUD, credential status, connection tests, and provider model presets.
 - `src/novel_translator/web/static/` — checked-in production bundle served by FastAPI; keep it synchronized with `web-client/dist/` after frontend builds.
 - `web-client/` — React/Vite frontend; browser state uses the versioned API under `/api/v1` and receives live operation updates through SSE.
 - `tests/unit`, `tests/integration`, `tests/provider` — core logic, project/SQLite flow, and mocked model-provider HTTP tests.
@@ -38,6 +41,7 @@
 - `novel-web` — starts the local web UI on `127.0.0.1`; with no `--project`, the browser opens the project picker where the user can open an existing absolute path or create a project under a parent directory. `--project <path>` opens a project directly.
 - Install web dependencies with `pip install -e "[web,dev]"`; use `novel-web --no-open` in automated/headless environments.
 - Import, translation, context management, and export are UI-only workflows exposed by both the desktop and local web UIs.
+- Provider profiles are global to the application; projects snapshot the selected profile and its configuration hash for resumable translation jobs.
 - The web launch token is one-time; subsequent API access requires the local app token/session cookie. Do not add network binding, CORS, API docs, credential values, or unredacted provider diagnostics.
 - Web mutations are queued and serialized per process; long-running work stays off the request thread, emits progress through SSE, and must honor cancellation at safe chunk/operation boundaries.
 - `translation_service.py` — process chunks sequentially, emit progress/project logs, persist context snapshots/metrics, and use a final transaction for chunk response, context merges, conflicts, and completion state.

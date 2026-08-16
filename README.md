@@ -7,7 +7,7 @@
 - Python 3.12
 - Một nhà cung cấp mô hình:
   - **Ollama** (mặc định), chạy cục bộ tại `http://localhost:11434`; hoặc
-  - **DeepSeek API**, với API key trong biến môi trường.
+  - **DeepSeek API** hoặc **Gemini**, với API key trong keyring hoặc biến môi trường.
 
 ## Cài đặt
 
@@ -69,12 +69,22 @@ Chọn thư mục `tien-hiep-demo` trong màn hình Start / Open. App tự kiể
 - preview rồi import source;
 - dịch một chapter hoặc một range bằng worker nền, theo dõi chunk progress và resume/force;
 - xem source, prompt đã render, context snapshot, output, diagnostic và metrics của từng model call;
-- chỉnh cấu hình đã validate, lưu DeepSeek key trong Windows Credential Manager qua `keyring`;
+- chỉnh cấu hình đã validate, quản lý provider profile global và lưu credential qua `keyring`;
 - quản lý glossary/context và export bản dịch hoặc context YAML.
 
 ### 2. Kiểm tra hoặc chỉnh cấu hình
 
-Mở `novel.yaml`. Cấu hình mặc định dùng Ollama cục bộ:
+Provider được lưu một lần ở cấp ứng dụng, dùng chung cho mọi project. Màn hình **Settings → Provider settings** quản lý profile, provider active, model, URL và credential. File global nằm ở:
+
+- Windows: `%APPDATA%/NovelTranslator/settings.yaml`
+- Linux: `~/.config/NovelTranslator/settings.yaml`
+- macOS: `~/Library/Application Support/NovelTranslator/settings.yaml`
+
+API key không được ghi vào YAML, SQLite, log hoặc diagnostics. Có thể dùng `NOVEL_TRANSLATOR_DEEPSEEK_API_KEY` và `NOVEL_TRANSLATOR_GEMINI_API_KEY` cho CI/headless.
+
+Project cũ vẫn đọc `model` trong `novel.yaml` và tự tạo profile global lần đầu mở; sau đó thay đổi provider không ghi model mới vào `novel.yaml`.
+
+Cấu hình legacy mặc định trong project vẫn có dạng:
 
 ```yaml
 model:
@@ -137,6 +147,10 @@ model:
 
 Đặt API key trong màn hình Settings; ứng dụng lưu nó trong Windows Credential Manager, không ghi vào `novel.yaml`. Adapter DeepSeek dùng endpoint Chat Completions và yêu cầu đầu ra JSON có cấu trúc.
 
+## Dùng Gemini
+
+Tạo hoặc chọn profile có `provider: gemini`, đặt model như `gemini-2.5-flash`, rồi nhập credential trong Provider settings. Adapter dùng Gemini `generateContent`, system instruction, JSON schema và usage metadata native của Gemini.
+
 ### Mở ứng dụng web local
 
 Cài web extra và chạy:
@@ -152,7 +166,7 @@ Server chỉ bind `127.0.0.1`; mặc định chọn port rảnh và mở browser
 novel-web --project C:\path\to\tien-hiep-demo --no-open
 ```
 
-Web app dùng REST `/api/v1` cho truy vấn/lệnh và SSE `/api/v1/events` cho tiến độ. Startup token đổi lấy cookie `HttpOnly`, không được ghi vào project, SQLite, log hoặc frontend state. DeepSeek API key chỉ đi qua endpoint write-only và keyring; settings API chỉ trả dữ liệu an toàn.
+Web app dùng REST `/api/v1` cho truy vấn/lệnh và SSE `/api/v1/events` cho tiến độ. Startup token đổi lấy cookie `HttpOnly`, không được ghi vào project, SQLite, log hoặc frontend state. Provider credentials chỉ đi qua endpoint write-only và keyring; settings API chỉ trả dữ liệu an toàn.
 
 Frontend source nằm trong `web-client/`. Build static artifact vào package bằng:
 

@@ -7,7 +7,7 @@ import time
 import httpx
 from pydantic import ValidationError
 
-from novel_translator.config import ModelSettings
+from novel_translator.config import ModelSettings, ProviderProfile
 from novel_translator.infrastructure.model.diagnostics import error_diagnostic, response_diagnostic
 from novel_translator.infrastructure.model.exceptions import (
     ModelConnectionError,
@@ -24,9 +24,9 @@ DEFAULT_BASE_URL = "https://api.deepseek.com"
 
 
 class DeepSeekProvider:
-    def __init__(self, settings: ModelSettings, client: httpx.Client | None = None) -> None:
+    def __init__(self, settings: ModelSettings | ProviderProfile, client: httpx.Client | None = None) -> None:
         self.settings = settings
-        self.client = client or httpx.Client(timeout=settings.request_timeout_seconds)
+        self.client = client or httpx.Client(timeout=getattr(settings, "request_timeout_seconds", 300))
         self.last_metrics = ProviderMetrics()
         self.last_diagnostic: ProviderDiagnostic | None = None
         self.last_attempts: list[ProviderAttempt] = []
@@ -41,7 +41,7 @@ class DeepSeekProvider:
             self.last_attempts.append(ProviderAttempt(1, "failed", self.last_metrics, self.last_diagnostic))
             raise ModelProviderError(message)
         payload: dict[str, object] = {
-            "model": self.settings.name,
+            "model": getattr(self.settings, "name", None) or getattr(self.settings, "model"),
             "messages": [
                 {"role": "system", "content": request.system_prompt},
                 {"role": "user", "content": request.user_prompt},
@@ -53,16 +53,22 @@ class DeepSeekProvider:
             payload["temperature"] = self.settings.options.temperature
         if self.settings.options.top_p is not None:
             payload["top_p"] = self.settings.options.top_p
+        if self.settings.options.max_output_tokens is not None:
+            payload["max_tokens"] = self.settings.options.max_output_tokens
         headers = {"Authorization": f"Bearer {self.settings.api_key.get_secret_value()}"}
         endpoint = f"{self._base_url.rstrip('/')}/chat/completions"
-        for attempt in range(self.settings.max_retries + 1):
+        for attempt in range(getattr(self.settings, "max_retries", 2) + 1):
             started_at = time.perf_counter()
             try:
                 response = self.client.post(endpoint, json=payload, headers=headers)
-                self.last_diagnostic = response_diagnostic("deepseek", response, "DeepSeek response received")
+                self.last_diagnostic = response_diagnostic(
+                    "deepseek", response, "DeepSeek response received", secrets=(self.settings.api_key.get_secret_value(),)
+                )
                 if response.status_code == 429 or response.status_code >= 500:
                     message = f"DeepSeek temporary HTTP {response.status_code}"
-                    self.last_diagnostic = response_diagnostic("deepseek", response, message)
+                    self.last_diagnostic = response_diagnostic(
+                        "deepseek", response, message, secrets=(self.settings.api_key.get_secret_value(),)
+                    )
                     raise ModelProviderError(message)
                 response.raise_for_status()
                 body = response.json()
@@ -104,7 +110,9 @@ class DeepSeekProvider:
                     )
             except httpx.HTTPStatusError as error:
                 message = f"DeepSeek HTTP {error.response.status_code}"
-                self.last_diagnostic = response_diagnostic("deepseek", error.response, message)
+                self.last_diagnostic = response_diagnostic(
+                    "deepseek", error.response, message, secrets=(self.settings.api_key.get_secret_value(),)
+                )
                 logger.error(
                     "DeepSeek request failed attempt=%s reason=%s raw_response=%s",
                     attempt + 1,
@@ -121,7 +129,7 @@ class DeepSeekProvider:
                 ProviderAttempt(attempt + 1, "failed", self.last_metrics, self.last_diagnostic)
             )
             diagnostic_body = self.last_diagnostic.body if self.last_diagnostic is not None else None
-            if attempt == self.settings.max_retries:
+            if attempt == getattr(self.settings, "max_retries", 2):
                 logger.error(
                     "DeepSeek request failed after %s attempt(s) reason=%s raw_response=%s",
                     attempt + 1,
@@ -139,6 +147,9 @@ class DeepSeekProvider:
 
     @property
     def _base_url(self) -> str:
-        if self.settings.provider.lower() == "deepseek" and self.settings.base_url == "http://localhost:11434":
+        provider = getattr(self.settings, "provider", "deepseek")
+        provider_name = provider.value if hasattr(provider, "value") else str(provider).lower()
+        base_url = getattr(self.settings, "base_url", None)
+        if provider_name == "deepseek" and base_url == "http://localhost:11434":
             return DEFAULT_BASE_URL
-        return self.settings.base_url or DEFAULT_BASE_URL
+        return base_url or DEFAULT_BASE_URL

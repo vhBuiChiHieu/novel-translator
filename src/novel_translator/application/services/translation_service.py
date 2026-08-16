@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -99,10 +100,23 @@ class TranslationService:
                 raise SourceChangedError("Source chapter has changed since previous translation.")
             novel = session.get(NovelORM, active.novel.id)
             assert novel is not None
-            job = self._select_job(session, novel, chapter, settings, resume, force, source)
+            provider = self.provider or create_model_provider(settings.model)
+            profile_id = getattr(provider, "profile_id", None)
+            config_hash = getattr(provider, "config_hash", None) or self._legacy_config_hash(settings)
+            job = self._select_job(
+                session,
+                novel,
+                chapter,
+                settings,
+                resume,
+                force,
+                source,
+                profile_id,
+                config_hash,
+                provider,
+            )
             job_id = job.id
             session.commit()
-        provider = self.provider or create_model_provider(settings.model)
         self._process_job(settings, job_id, chapter_number, provider, on_progress, should_cancel)
         with sessions() as session:
             completed = session.get(TranslationJobORM, job_id)
@@ -119,12 +133,22 @@ class TranslationService:
         resume: bool,
         force: bool,
         source: str,
+        profile_id: str | None,
+        config_hash: str,
+        provider: ModelProvider,
     ) -> TranslationJobORM:
         assert hasattr(session, "scalars")
         prior = list(session.scalars(select(TranslationJobORM).where(TranslationJobORM.chapter_id == chapter.id).order_by(TranslationJobORM.id.desc())))
         if resume:
             job = next((item for item in prior if item.status != JobStatus.COMPLETED.value), None)
             if job is not None:
+                if self._job_provider_changed(job, settings, profile_id, config_hash) and not force:
+                    raise ValueError("The active provider differs from the provider used by this job; use force to resume")
+                if force:
+                    job.model_provider = self._provider_name(provider, settings)
+                    job.model_name = self._model_name(provider, settings)
+                    job.profile_id = profile_id
+                    job.config_hash = config_hash
                 return job
         if not resume and any(item.status == JobStatus.RUNNING.value for item in prior):
             raise ValueError("A translation job is already running for this chapter")
@@ -135,6 +159,8 @@ class TranslationService:
             chapter_id=chapter.id,
             model_provider=settings.model.provider,
             model_name=settings.model.name,
+            profile_id=profile_id,
+            config_hash=config_hash,
             prompt_version=settings.prompt_version,
             status=JobStatus.PENDING.value,
         )
@@ -154,6 +180,33 @@ class TranslationService:
                 )
             )
         return job
+
+    @staticmethod
+    def _provider_name(provider: ModelProvider, settings: ProjectSettings) -> str:
+        configured = getattr(provider, "settings", None)
+        value = getattr(configured, "provider", settings.model.provider)
+        return value.value if hasattr(value, "value") else str(value)
+
+    @staticmethod
+    def _model_name(provider: ModelProvider, settings: ProjectSettings) -> str:
+        configured = getattr(provider, "settings", None)
+        return str(getattr(configured, "model", None) or getattr(configured, "name", settings.model.name))
+
+    @classmethod
+    def _job_provider_changed(
+        cls, job: TranslationJobORM, settings: ProjectSettings, profile_id: str | None, config_hash: str
+    ) -> bool:
+        return (
+            (job.profile_id is not None and job.profile_id != profile_id)
+            or (job.config_hash is not None and job.config_hash != config_hash)
+            or job.model_provider != settings.model.provider
+            or job.model_name != settings.model.name
+        )
+
+    @staticmethod
+    def _legacy_config_hash(settings: ProjectSettings) -> str:
+        payload = settings.model.model_dump(exclude={"api_key"}, mode="json")
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
     def _process_job(
         self,
