@@ -22,6 +22,23 @@ from novel_translator.schemas.translation_response import TranslationResponse
 
 logger = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+_GEMINI_SCHEMA_KEYS = {
+    "type",
+    "format",
+    "title",
+    "description",
+    "nullable",
+    "enum",
+    "maxItems",
+    "minItems",
+    "properties",
+    "required",
+    "propertyOrdering",
+    "items",
+    "minProperties",
+    "maxProperties",
+    "anyOf",
+}
 
 
 class GeminiProvider:
@@ -44,12 +61,13 @@ class GeminiProvider:
             message = "Gemini API key is not configured"
             self.last_diagnostic = error_diagnostic("gemini", message)
             self.last_attempts.append(ProviderAttempt(1, "failed", self.last_metrics, self.last_diagnostic))
+            logger.error("Gemini request failed before attempt reason=%s", message)
             raise ModelProviderError(message)
 
         options = getattr(self.settings, "options", None)
         generation_config: dict[str, object] = {
             "responseMimeType": "application/json",
-            "responseSchema": TranslationResponse.model_json_schema(),
+            "responseSchema": self._response_schema(),
         }
         for source, target in (("temperature", "temperature"), ("top_p", "topP"), ("top_k", "topK"), ("max_output_tokens", "maxOutputTokens")):
             value = getattr(options, source, None) if options is not None else None
@@ -112,6 +130,12 @@ class GeminiProvider:
                 self.last_diagnostic = response_diagnostic(
                     "gemini", error.response, message, secrets=(api_key.get_secret_value(),)
                 )
+                logger.error(
+                    "Gemini request failed attempt=%s reason=%s raw_response=%s",
+                    attempt + 1,
+                    message,
+                    json.dumps(self.last_diagnostic.body, ensure_ascii=False),
+                )
                 self.last_attempts.append(ProviderAttempt(attempt + 1, "failed", self.last_metrics, self.last_diagnostic))
                 raise ModelProviderError(message) from error
             except ModelProviderError as error:
@@ -143,6 +167,36 @@ class GeminiProvider:
 
     def _model(self) -> str:
         return str(self._value("model", self._value("name", "gemini-2.5-flash")))
+
+    @staticmethod
+    def _response_schema() -> dict[str, object]:
+        raw_schema = TranslationResponse.model_json_schema()
+        definitions = raw_schema.pop("$defs", {})
+
+        def inline(value: object) -> object:
+            if isinstance(value, dict):
+                reference = value.get("$ref")
+                if isinstance(reference, str):
+                    definition_name = reference.rsplit("/", 1)[-1]
+                    return inline(definitions[definition_name])
+                result: dict[str, object] = {}
+                for key, child in value.items():
+                    if key not in _GEMINI_SCHEMA_KEYS:
+                        continue
+                    if key == "type" and isinstance(child, str):
+                        result[key] = child.upper()
+                    elif key == "properties" and isinstance(child, dict):
+                        result[key] = {str(name): inline(schema) for name, schema in child.items()}
+                    else:
+                        result[key] = inline(child)
+                return result
+            if isinstance(value, list):
+                return [inline(item) for item in value]
+            return value
+
+        normalized = inline(raw_schema)
+        assert isinstance(normalized, dict)
+        return normalized
 
     def _value(self, name: str, default: object) -> object:
         return getattr(self.settings, name, default)

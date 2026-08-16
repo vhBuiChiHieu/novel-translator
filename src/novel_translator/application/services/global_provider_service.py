@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -10,9 +12,12 @@ from novel_translator.config import (
     ModelSettings,
     ProviderProfile,
     ProviderType,
+    default_global_provider_settings,
 )
 from novel_translator.infrastructure.config.credentials import ProviderCredentialStore
 from novel_translator.infrastructure.config.store import GlobalSettingsStore
+
+logger = logging.getLogger(__name__)
 
 
 class GlobalProviderService:
@@ -85,12 +90,18 @@ class GlobalProviderService:
 
     def delete(self, profile_id: str) -> None:
         settings = self.settings()
-        self._get(settings, profile_id)
+        profile = self._get(settings, profile_id)
         if len(settings.profiles) == 1:
-            raise ValueError("At least one provider profile must remain")
-        del settings.profiles[profile_id]
-        if settings.active_profile == profile_id:
-            settings.active_profile = next(iter(settings.profiles))
+            defaults = default_global_provider_settings()
+            default_profile = defaults.profiles[defaults.active_profile]
+            if profile_id == defaults.active_profile and profile == default_profile:
+                raise ValueError("The default Ollama profile must remain")
+            settings.profiles = defaults.profiles
+            settings.active_profile = defaults.active_profile
+        else:
+            del settings.profiles[profile_id]
+            if settings.active_profile == profile_id:
+                settings.active_profile = next(iter(settings.profiles))
         self.store.save(settings)
         self.credentials.delete(profile_id)
 
@@ -130,19 +141,44 @@ class GlobalProviderService:
             ProviderType.DEEPSEEK: "https://api.deepseek.com",
             ProviderType.GEMINI: "https://generativelanguage.googleapis.com",
         }[profile.provider]
-        endpoint = f"{base_url.rstrip('/')}/api/tags" if profile.provider == ProviderType.OLLAMA else base_url.rstrip("/")
+        base = base_url.rstrip("/")
+        if profile.provider == ProviderType.OLLAMA:
+            endpoint = f"{base}/api/tags"
+        elif profile.provider == ProviderType.DEEPSEEK:
+            endpoint = f"{base}/models"
+        else:
+            gemini_base = base if base.endswith("/v1beta") else f"{base}/v1beta"
+            endpoint = f"{gemini_base}/models/{quote(profile.model, safe='')}"
         try:
             with httpx.Client(timeout=profile.request_timeout_seconds) as client:
                 response = client.get(endpoint, headers=headers)
             response.raise_for_status()
-        except httpx.HTTPError as error:
-            raise RuntimeError(f"{profile.provider.value} connection failed: {error}") from error
+        except httpx.HTTPStatusError as error:
+            logger.error(
+                "Provider connection failed profile_id=%s provider=%s status_code=%s",
+                profile_id,
+                profile.provider.value,
+                error.response.status_code,
+            )
+            raise RuntimeError(f"{profile.provider.value} connection failed: HTTP {error.response.status_code}") from error
+        except httpx.RequestError as error:
+            logger.error(
+                "Provider connection failed profile_id=%s provider=%s error_type=%s",
+                profile_id,
+                profile.provider.value,
+                type(error).__name__,
+            )
+            raise RuntimeError(f"{profile.provider.value} connection failed: {type(error).__name__}") from error
         return {"ok": True, "provider": profile.provider.value, "status_code": response.status_code}
 
     def ensure_project_profile(self, project_settings: ModelSettings, project_name: str = "") -> str:
-        """Create the first global profile and migrate a legacy project credential."""
+        """Reuse an existing global profile; migrate a project only into an empty store."""
         settings = self.settings() if self.store.exists() else GlobalProviderSettings(config_version=2, active_profile="", profiles={})
         if settings.active_profile in settings.profiles:
+            return settings.active_profile
+        if settings.profiles:
+            settings.active_profile = next(iter(settings.profiles))
+            self.store.save(settings)
             return settings.active_profile
         provider = project_settings.provider.lower()
         try:

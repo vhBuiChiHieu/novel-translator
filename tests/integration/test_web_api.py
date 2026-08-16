@@ -32,6 +32,11 @@ def test_web_bootstrap_project_and_dashboard() -> None:
             assert settings.status_code == 200
             assert "api_key" not in settings.json()
             assert "secret" not in settings.text.lower()
+            update = client.patch("/api/v1/settings", json={"prompt_version": "translation-v2"})
+            assert update.status_code == 200
+            assert update.json()["prompt_version"] == "translation-v2"
+            assert client.get("/api/v1/settings").json()["prompt_version"] == "translation-v2"
+            assert "prompt_version: translation-v2" in (project / "novel.yaml").read_text(encoding="utf-8")
 
 
 def test_web_creates_and_opens_project() -> None:

@@ -31,6 +31,9 @@ def test_gemini_maps_native_structured_request_and_usage() -> None:
         assert body["contents"] == [{"role": "user", "parts": [{"text": "user"}]}]
         assert body["generationConfig"]["responseMimeType"] == "application/json"
         assert body["generationConfig"]["responseSchema"]["title"] == "TranslationResponse"
+        schema_text = json.dumps(body["generationConfig"]["responseSchema"])
+        assert "$defs" not in schema_text
+        assert "$ref" not in schema_text
         return httpx.Response(
             200,
             json={

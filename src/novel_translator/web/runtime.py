@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import logging
 import secrets
 import threading
 from collections import deque
@@ -26,6 +27,7 @@ from .serializers import redact_sensitive
 
 SESSION_COOKIE = "novel_local_session"
 EVENT_BUFFER_SIZE = 500
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> datetime:
@@ -128,6 +130,7 @@ class WebRuntime:
         self._operations: dict[str, Operation] = {}
         self._active_operation_id: str | None = None
         self._project_path: Path | None = None
+        self._facade: ApplicationFacade | None = None
         self._recent_projects: list[Path] = []
         self._startup_error: list[str] = []
         self._startup_token = secrets.token_hex(32)
@@ -203,7 +206,7 @@ class WebRuntime:
             raise WebError(422, "PROJECT_INVALID", "The selected directory is not a valid project.", {"errors": errors})
         with self._lock:
             self._raise_if_busy()
-            ApplicationFacade(project_path)
+            self._facade = ApplicationFacade(project_path)
             self._project_path = project_path
             self._startup_error = []
             self._recent_projects = [project_path, *(item for item in self._recent_projects if item != project_path)][:10]
@@ -233,9 +236,11 @@ class WebRuntime:
     def current_facade(self) -> ApplicationFacade:
         with self._lock:
             path = self._project_path
-        if path is None:
-            raise WebError(409, "PROJECT_NOT_OPEN", "No project is open.")
-        return ApplicationFacade(path)
+            if path is None:
+                raise WebError(409, "PROJECT_NOT_OPEN", "No project is open.")
+            if self._facade is None:
+                self._facade = ApplicationFacade(path)
+            return self._facade
 
     def current_path(self) -> Path:
         with self._lock:
@@ -296,6 +301,14 @@ class WebRuntime:
                 operation.error = safe_error(error)
                 operation.status = "cancelled" if mapped.code == "OPERATION_CANCELLED" else "failed"
                 operation.completed_at = utc_now()
+            logger.error(
+                "Operation failed operation_id=%s kind=%s code=%s exception_type=%s error=%s",
+                operation.operation_id,
+                operation.kind,
+                mapped.code,
+                type(error).__name__,
+                operation.error,
+            )
             self._publish_operation(operation, "operation_cancelled" if operation.status == "cancelled" else "operation_failed")
         finally:
             with self._lock:

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -84,6 +85,14 @@ def test_translation_persists_chunk_and_resumes_without_retranslation(
     assert len(chunks) == 1
     assert chunks[0].status == "completed"
     assert chunks[0].context_snapshot_json == ContextSnapshot().model_dump()
+    raw_chunk_dir = next((project / "logs" / "jobs").glob("job-*/chunk-*"))
+    assert (raw_chunk_dir / "raw-prompt.txt").read_text(encoding="utf-8").startswith(
+        "===== SYSTEM PROMPT =====\n"
+    )
+    raw_response = json.loads(
+        (raw_chunk_dir / "raw-response-attempt-01.json").read_text(encoding="utf-8")
+    )
+    assert raw_response["parsed_response"]["translation"] == "Bản dịch tiếng Việt có nội dung hợp lệ."
 
     # A completed job remains immutable; callers must use --force for a new job.
     assert job.total_prompt_tokens == 4
@@ -116,6 +125,12 @@ def test_translation_persists_failure_diagnostic_and_progress(
             "body": {"error": "unavailable"},
             "truncated": False,
         }
+    raw_chunk_dir = next((project / "logs" / "jobs").glob("job-*/chunk-*"))
+    raw_response = json.loads(
+        (raw_chunk_dir / "raw-response-attempt-01.json").read_text(encoding="utf-8")
+    )
+    assert raw_response["body"] == {"error": "unavailable"}
+    assert raw_response["status"] == "failed"
     assert [event.event for event in progress] == ["job_started", "chunk_started", "chunk_failed"]
 
 

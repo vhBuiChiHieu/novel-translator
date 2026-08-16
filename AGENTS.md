@@ -46,6 +46,7 @@
 - Web mutations are queued and serialized per process; long-running work stays off the request thread, emits progress through SSE, and must honor cancellation at safe chunk/operation boundaries.
 - `translation_service.py` — process chunks sequentially, emit progress/project logs, persist context snapshots/metrics, and use a final transaction for chunk response, context merges, conflicts, and completion state.
 - Provider failures — log the sanitized raw response before retrying or failing; failed chunks persist the final diagnostic in `raw_model_response_json`.
+- Each model call writes its rendered prompt and sanitized response attempts under `logs/jobs/job-<id>/chunk-<id>/`; credentials must never be written to these files.
 - `domain/context/merger.py` — confirmed mappings are authoritative; translation conflicts create records rather than overwrite mappings.
 - `domain/context/retriever.py` — retrieves confirmed exact source/alias matches and expands relationships only one level.
 

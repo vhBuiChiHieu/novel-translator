@@ -39,6 +39,7 @@ class DeepSeekProvider:
             message = "DeepSeek API key is not configured"
             self.last_diagnostic = error_diagnostic("deepseek", message)
             self.last_attempts.append(ProviderAttempt(1, "failed", self.last_metrics, self.last_diagnostic))
+            logger.error("DeepSeek request failed before attempt reason=%s", message)
             raise ModelProviderError(message)
         payload: dict[str, object] = {
             "model": getattr(self.settings, "name", None) or getattr(self.settings, "model"),

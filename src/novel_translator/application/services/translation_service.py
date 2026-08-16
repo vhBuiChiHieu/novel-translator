@@ -21,6 +21,7 @@ from novel_translator.domain.translation.chunker import ParagraphChapterChunker,
 from novel_translator.domain.translation.response_validator import validate_response
 from novel_translator.infrastructure.model.factory import create_model_provider
 from novel_translator.infrastructure.model.provider import ModelProvider, ProviderAttempt, ProviderMetrics
+from novel_translator.infrastructure.model.raw_logging import write_raw_prompt, write_raw_responses
 from novel_translator.infrastructure.persistence.database import (
     create_session_factory,
     create_sqlite_engine,
@@ -375,9 +376,14 @@ class TranslationService:
             session.flush()
             audit_id = audit.id
             session.commit()
+        write_raw_prompt(settings.project_path, job_id, chunk_id, rendered.request)
+        provider_response: TranslationResponse | None = None
         try:
-            response = validate_response(provider.translate(rendered.request), source_text, settings.validation)
-        except Exception:
+            provider_response = provider.translate(rendered.request)
+            write_raw_responses(settings.project_path, job_id, chunk_id, provider, provider_response)
+            response = validate_response(provider_response, source_text, settings.validation)
+        except Exception as error:
+            write_raw_responses(settings.project_path, job_id, chunk_id, provider, provider_response, error)
             with sessions() as session:
                 audit_row = session.get(ModelCallORM, audit_id)
                 if audit_row is not None:

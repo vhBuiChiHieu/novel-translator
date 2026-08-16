@@ -22,6 +22,11 @@ def configure_project_logging(project_path: Path, level: str) -> None:
     log_path = project_path / "logs" / "novel-translator.log"
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
+    root.disabled = False
+    for logger_name, candidate in root.manager.loggerDict.items():
+        if logger_name == "novel_translator" or logger_name.startswith("novel_translator."):
+            if isinstance(candidate, logging.Logger):
+                candidate.disabled = False
     if _listener is not None and _log_path == log_path:
         return
     shutdown_project_logging()
